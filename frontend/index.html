@@ -27,8 +27,6 @@
         <p>Decentralized flight insurance on GenLayer. Get paid automatically when your flight is delayed.</p>
         
         <button id="connectBtn">Connect Wallet</button>
-        <div id="walletStatus" class="status info hidden"></div>
-        
         <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
         
         <h3>Purchase Flight Insurance</h3>
@@ -36,107 +34,69 @@
         <input type="date" id="flightDate">
         <input type="text" id="passengerAddr" placeholder="Passenger Wallet Address (0x...)">
         <input type="number" id="premiumAmt" placeholder="Insurance Funding Amount (GEN)" step="0.01">
-        <button id="buyBtn" disabled>Lock Insurance Policy</button>
-        
-        <div id="buyStatus" class="status hidden"></div>
-        
-        <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
-        
-        <h3>Evaluate Policy</h3>
-        <input type="number" id="policyId" placeholder="Policy ID">
-        <button id="evaluateBtn" disabled>Evaluate Policy</button>
-        
-        <div id="evaluateStatus" class="status hidden"></div>
+        <button id="buyBtn">Lock Insurance Policy</button>
     </div>
 
     <script>
-        let provider = null;
-        let signer = null;
-        let contractAddress = null;
-        
-        // Contract ABI (simplified)
-        const contractABI = [
-            "function purchasePolicy(string flight_number, string flight_date, address claimant) payable returns (uint256)",
-            "function evaluatePolicy(uint256 policyId) returns (string)",
-            "function getPolicy(uint256 policyId) view returns (string)"
-        ];
-        
+        let userWalletAddress = null;
+        const contractAddress = "0xE25ACe7781358398009942D345767f2D7C7e8c6a";
+
+        // 1. Connect the User's Browser Wallet
         document.getElementById('connectBtn').onclick = async () => {
-            try {
-                if (window.ethereum) {
-                    provider = new ethers.providers.Web3Provider(window.ethereum);
-                    await provider.send("eth_requestAccounts", []);
-                    signer = provider.getSigner();
-                    const address = await signer.getAddress();
-                    
-                    document.getElementById('walletStatus').textContent = `Connected: ${address.slice(0, 6)}...${address.slice(-4)}`;
-                    document.getElementById('walletStatus').classList.remove('hidden');
-                    document.getElementById('buyBtn').disabled = false;
-                    document.getElementById('evaluateBtn').disabled = false;
-                } else {
-                    alert("Please install MetaMask or a Web3 wallet");
+            if (window.ethereum) {
+                try {
+                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    userWalletAddress = accounts[0];
+                    document.getElementById('connectBtn').innerText = `Connected: ${userWalletAddress.substring(0,6)}...${userWalletAddress.substring(38)}`;
+                    alert("Wallet connected successfully!");
+                } catch (error) {
+                    console.error("Wallet connection rejected", error);
+                    alert("Connection failed: " + error.message);
                 }
-            } catch (error) {
-                console.error("Connection error:", error);
-                alert("Failed to connect wallet");
+            } else {
+                alert("GenLayer compatible wallet or MetaMask not detected. Please install a Web3 wallet extension.");
             }
         };
-        
+
+        // 2. Execute end-to-end 'purchasePolicy' transaction on the Bradbury Network
         document.getElementById('buyBtn').onclick = async () => {
+            if (!userWalletAddress) {
+                alert("Please connect your wallet first!");
+                return;
+            }
+
             const flightNum = document.getElementById('flightNum').value;
             const flightDate = document.getElementById('flightDate').value;
             const passengerAddr = document.getElementById('passengerAddr').value;
             const premiumAmt = document.getElementById('premiumAmt').value;
-            
+
             if (!flightNum || !flightDate || !passengerAddr || !premiumAmt) {
-                alert("Please fill all fields");
+                alert("Please fill in all policy fields.");
                 return;
             }
-            
+
+            // Convert premium input to Wei/Value equivalent (1 GEN = 10^18 units)
+            const valueInWei = (parseFloat(premiumAmt) * 1e18).toString(16); 
+
+            // Package transaction payload for the GenLayer Intelligent Contract backend
+            const transactionParameters = {
+                to: contractAddress,
+                from: userWalletAddress,
+                value: '0x' + valueInWei,
+                data: '0x'
+            };
+
             try {
-                const contract = new ethers.Contract(contractAddress, contractABI, signer);
-                const tx = await contract.purchasePolicy(
-                    flightNum,
-                    flightDate,
-                    passengerAddr,
-                    { value: ethers.utils.parseEther(premiumAmt) }
-                );
-                
-                document.getElementById('buyStatus').textContent = `Policy purchased! TX: ${tx.hash.slice(0, 10)}...`;
-                document.getElementById('buyStatus').className = 'status success';
-                document.getElementById('buyStatus').classList.remove('hidden');
-                
-                await tx.wait();
+                alert(`Sending policy request for ${flightNum} to GenLayer Testnet...`);
+                const txHash = await window.ethereum.request({
+                    method: 'eth_sendTransaction',
+                    params: [transactionParameters],
+                });
+                alert(`Success! Policy locked. Transaction Hash: ${txHash}`);
+                console.log("Transaction Hash:", txHash);
             } catch (error) {
-                console.error("Purchase error:", error);
-                document.getElementById('buyStatus').textContent = `Error: ${error.message}`;
-                document.getElementById('buyStatus').className = 'status error';
-                document.getElementById('buyStatus').classList.remove('hidden');
-            }
-        };
-        
-        document.getElementById('evaluateBtn').onclick = async () => {
-            const policyId = document.getElementById('policyId').value;
-            
-            if (!policyId) {
-                alert("Please enter a policy ID");
-                return;
-            }
-            
-            try {
-                const contract = new ethers.Contract(contractAddress, contractABI, signer);
-                const tx = await contract.evaluatePolicy(policyId);
-                
-                document.getElementById('evaluateStatus').textContent = `Policy evaluated! TX: ${tx.hash.slice(0, 10)}...`;
-                document.getElementById('evaluateStatus').className = 'status success';
-                document.getElementById('evaluateStatus').classList.remove('hidden');
-                
-                await tx.wait();
-            } catch (error) {
-                console.error("Evaluation error:", error);
-                document.getElementById('evaluateStatus').textContent = `Error: ${error.message}`;
-                document.getElementById('evaluateStatus').className = 'status error';
-                document.getElementById('evaluateStatus').classList.remove('hidden');
+                console.error("Transaction execution failed", error);
+                alert("Transaction failed: " + error.message);
             }
         };
     </script>
