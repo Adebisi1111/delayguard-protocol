@@ -3,102 +3,446 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DelayGuard Protocol — Flight Insurance on GenLayer</title>
+    <title>DelayGuard Protocol — Flight Insurance</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; background: #f5f5f5; }
-        .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h2 { color: #333; margin-bottom: 10px; }
-        p { color: #666; margin-bottom: 20px; }
-        input, button { width: 100%; padding: 12px; margin: 8px 0; box-sizing: border-box; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
-        input:focus { outline: none; border-color: #007bff; }
-        button { background: #007bff; color: white; border: none; cursor: pointer; font-weight: 600; margin-top: 15px; }
-        button:hover { background: #0056b3; }
-        button:disabled { background: #ccc; cursor: not-allowed; }
-        .status { padding: 10px; border-radius: 6px; margin-top: 15px; text-align: center; font-weight: 500; }
-        .success { background: #d4edda; color: #155724; }
-        .error { background: #f8d7da; color: #721c24; }
-        .info { background: #d1ecf1; color: #0c5460; }
-        .hidden { display: none; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0a0a0f; color: #e0e0e0; min-height: 100vh; }
+        .container { max-width: 600px; margin: 0 auto; padding: 2rem 1rem; }
+        h1 { font-size: 1.8rem; color: #00d4aa; margin-bottom: 0.5rem; }
+        .subtitle { color: #888; margin-bottom: 2rem; font-size: 0.9rem; }
+        .card { background: #151520; border: 1px solid #2a2a3a; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .card h2 { font-size: 1.1rem; color: #00d4aa; margin-bottom: 1rem; }
+        label { display: block; font-size: 0.85rem; color: #888; margin-bottom: 0.3rem; margin-top: 0.8rem; }
+        input, select { width: 100%; padding: 0.75rem; background: #0a0a0f; border: 1px solid #2a2a3a; border-radius: 8px; color: #e0e0e0; font-size: 1rem; }
+        input:focus, select:focus { outline: none; border-color: #00d4aa; }
+        button { width: 100%; padding: 0.9rem; background: #00d4aa; color: #0a0a0f; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 1rem; }
+        button:hover { background: #00b894; }
+        button:disabled { background: #333; color: #666; cursor: not-allowed; }
+        .status { padding: 0.75rem; background: #0a0a0f; border-radius: 8px; margin-top: 0.8rem; font-size: 0.85rem; word-break: break-all; }
+        .status.success { color: #00d4aa; border: 1px solid #00d4aa33; }
+        .status.error { color: #ff6b6b; border: 1px solid #ff6b6b33; }
+        .status.pending { color: #ffd93d; border: 1px solid #ffd93d33; }
+        .info-row { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid #1a1a2a; }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: #888; font-size: 0.85rem; }
+        .info-value { color: #e0e0e0; font-size: 0.85rem; font-weight: 500; }
+        .pill { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; }
+        .pill.researching { background: #ffd93d33; color: #ffd93d; }
+        .pill.resolved { background: #00d4aa33; color: #00d4aa; }
+        .pill.payout { background: #00d4aa33; color: #00d4aa; }
+        .pill.refund { background: #ff6b6b33; color: #ff6b6b; }
+        .pill.delayed { background: #ff6b6b33; color: #ff6b6b; }
+        .pill.ontime { background: #00d4aa33; color: #00d4aa; }
+        #wallet-info { display: none; }
+        .wallet-connected #wallet-info { display: block; }
+        .wallet-connected #connect-btn { display: none; }
+        .transfer-item { padding: 0.5rem; background: #0a0a0f; border-radius: 8px; margin-bottom: 0.5rem; }
+        a { color: #00d4aa; text-decoration: none; }
+        a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>✈️ DelayGuard Protocol</h2>
-        <p>Decentralized flight insurance on GenLayer. Get paid automatically when your flight is delayed.</p>
-        
-        <button id="connectBtn">Connect Wallet</button>
-        <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
-        
-        <h3>Purchase Flight Insurance</h3>
-        <input type="text" id="flightNum" placeholder="Flight Number (e.g. BA173)">
-        <input type="date" id="flightDate">
-        <input type="text" id="passengerAddr" placeholder="Passenger Wallet Address (0x...)">
-        <input type="number" id="premiumAmt" placeholder="Insurance Funding Amount (GEN)" step="0.01">
-        <button id="buyBtn">Lock Insurance Policy</button>
+        <h1>DelayGuard Protocol</h1>
+        <p class="subtitle">Flight Insurance on GenLayer Bradbury Testnet</p>
+
+        <div class="card">
+            <h2>Wallet</h2>
+            <button id="connect-btn" onclick="connectWallet()">Connect Wallet</button>
+            <div id="wallet-info">
+                <div class="info-row">
+                    <span class="info-label">Address</span>
+                    <span class="info-value" id="wallet-address">—</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Balance</span>
+                    <span class="info-value" id="wallet-balance">—</span>
+                </div>
+                <button onclick="disconnectWallet()" style="margin-top:0.8rem; background:#ff6b6b;">Disconnect</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Purchase Policy</h2>
+            <label>Flight Number</label>
+            <input id="flight-number" placeholder="e.g. BA173" value="BA173">
+
+            <label>Flight Date</label>
+            <input id="flight-date" type="date" placeholder="2026-09-15" value="2026-09-15">
+
+            <label>Coverage Amount (GEN)</label>
+            <input id="coverage-amount" type="number" placeholder="0.005" value="0.005" step="0.001" min="0.001">
+
+            <label>Claimant Address (optional, defaults to you)</label>
+            <input id="claimant-address" placeholder="0x...">
+
+            <button id="purchase-btn" onclick="purchasePolicy()" disabled>Purchase Policy</button>
+            <div id="purchase-status"></div>
+        </div>
+
+        <div class="card">
+            <h2>My Policies</h2>
+            <button onclick="loadPolicies()" style="margin-top:0;">Refresh</button>
+            <div id="policies-list"></div>
+        </div>
+
+        <div class="card">
+            <h2>Evaluate Policy (Trigger Payout/Refund)</h2>
+            <label>Policy ID</label>
+            <input id="eval-policy-id" type="number" placeholder="0" value="0">
+
+            <label>Flight Status</label>
+            <select id="eval-status">
+                <option value="DELAYED">DELAYED (>= 30 min delay → payout to claimant)</option>
+                <option value="ON_TIME">ON_TIME (refund to depositor)</option>
+            </select>
+
+            <label>Delay Minutes</label>
+            <input id="eval-delay" type="number" placeholder="75" value="75">
+
+            <button id="eval-btn" onclick="evaluatePolicy()" disabled>Evaluate</button>
+            <div id="eval-status"></div>
+        </div>
+
+        <div class="card">
+            <h2>Transfer History</h2>
+            <button onclick="loadTransfers()" style="margin-top:0;">Refresh</button>
+            <div id="transfers-list"></div>
+        </div>
     </div>
 
     <script>
-        let userWalletAddress = null;
-        const contractAddress = "0xE25ACe7781358398009942D345767f2D7C7e8c6a";
+    const CONTRACT = '0x318CBF3Ad6B0c57F6BFCA096C9b55665e08cb883';
+    const EXPLORER = 'https://explorer-bradbury.genlayer.com';
+    const CHAIN_ID = '0x1194D'; // 72013 in hex
 
-        // 1. Connect the User's Browser Wallet
-        document.getElementById('connectBtn').onclick = async () => {
-            if (window.ethereum) {
-                try {
-                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-                    userWalletAddress = accounts[0];
-                    document.getElementById('connectBtn').innerText = `Connected: ${userWalletAddress.substring(0,6)}...${userWalletAddress.substring(38)}`;
-                    alert("Wallet connected successfully!");
-                } catch (error) {
-                    console.error("Wallet connection rejected", error);
-                    alert("Connection failed: " + error.message);
-                }
-            } else {
-                alert("GenLayer compatible wallet or MetaMask not detected. Please install a Web3 wallet extension.");
-            }
+    let account = null;
+
+    // Simple ABI encoder for function calls
+    function encodeFunctionCall(functionName, args) {
+        // Pre-encoded function selectors (first 4 bytes of keccak256)
+        const selectors = {
+            'purchasePolicy': '0x42a7850a',
+            'evaluatePolicy': '0x093913f4',
+            'getPolicy': '0x2b07fce3',
+            'getTransferCount': '0x040e55f5',
+            'getEmittedTransfers': '0xbf341512',
+            'getTransfer': '0x7ec6cfca',
         };
+        
+        let data = selectors[functionName];
+        if (!data) throw new Error('Unknown function: ' + functionName);
+        
+        // Encode arguments
+        let encodedArgs = '';
+        for (const arg of args) {
+            if (typeof arg === 'string' && arg.startsWith('0x')) {
+                // Address: pad to 32 bytes
+                encodedArgs += arg.slice(2).padStart(64, '0');
+            } else if (typeof arg === 'string') {
+                // String: offset + length + data
+                const hex = stringToHex(arg);
+                encodedArgs += '0000000000000000000000000000000000000000000000000000000000000040'; // offset
+                encodedArgs += hex.length.toString(16).padStart(64, '0'); // length
+                encodedArgs += hex.padEnd(Math.ceil(hex.length / 64) * 64, '0'); // data
+            } else if (typeof arg === 'number' || typeof arg === 'bigint') {
+                // Number: 32 bytes
+                const hex = BigInt(arg).toString(16);
+                encodedArgs += hex.padStart(64, '0');
+            }
+        }
+        
+        return data + encodedArgs;
+    }
 
-        // 2. Execute end-to-end 'purchasePolicy' transaction on the Bradbury Network
-        document.getElementById('buyBtn').onclick = async () => {
-            if (!userWalletAddress) {
-                alert("Please connect your wallet first!");
+    function stringToHex(str) {
+        let hex = '';
+        for (let i = 0; i < str.length; i++) {
+            hex += str.charCodeAt(i).toString(16).padStart(2, '0');
+        }
+        return hex;
+    }
+
+    function showStatus(elementId, message, type) {
+        const el = document.getElementById(elementId);
+        el.className = 'status ' + type;
+        el.innerHTML = message;
+        el.style.display = 'block';
+    }
+
+    async function connectWallet() {
+        try {
+            if (!window.ethereum) {
+                showStatus('purchase-status', 'No wallet detected. Please install MetaMask or a Web3 wallet.', 'error');
                 return;
             }
 
-            const flightNum = document.getElementById('flightNum').value;
-            const flightDate = document.getElementById('flightDate').value;
-            const passengerAddr = document.getElementById('passengerAddr').value;
-            const premiumAmt = document.getElementById('premiumAmt').value;
+            // Request account access
+            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+            account = accounts[0];
 
-            if (!flightNum || !flightDate || !passengerAddr || !premiumAmt) {
-                alert("Please fill in all policy fields.");
-                return;
-            }
-
-            // Convert premium input to Wei/Value equivalent (1 GEN = 10^18 units)
-            const valueInWei = (parseFloat(premiumAmt) * 1e18).toString(16); 
-
-            // Package transaction payload for the GenLayer Intelligent Contract backend
-            const transactionParameters = {
-                to: contractAddress,
-                from: userWalletAddress,
-                value: '0x' + valueInWei,
-                data: '0x'
-            };
-
+            // Switch to Bradbury network
             try {
-                alert(`Sending policy request for ${flightNum} to GenLayer Testnet...`);
-                const txHash = await window.ethereum.request({
-                    method: 'eth_sendTransaction',
-                    params: [transactionParameters],
+                await window.ethereum.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: CHAIN_ID }],
                 });
-                alert(`Success! Policy locked. Transaction Hash: ${txHash}`);
-                console.log("Transaction Hash:", txHash);
-            } catch (error) {
-                console.error("Transaction execution failed", error);
-                alert("Transaction failed: " + error.message);
+            } catch (switchError) {
+                if (switchError.code === 4902) {
+                    await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                            chainId: CHAIN_ID,
+                            chainName: 'GenLayer Bradbury Testnet',
+                            rpcUrls: ['https://studio.genlayer.com/api'],
+                            nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
+                            blockExplorerUrls: [EXPLORER],
+                        }],
+                    });
+                }
             }
-        };
+
+            // Update UI
+            document.getElementById('wallet-address').textContent = account.slice(0, 6) + '...' + account.slice(-4);
+            document.getElementById('wallet-info').style.display = 'block';
+            document.getElementById('connect-btn').style.display = 'none';
+            document.getElementById('purchase-btn').disabled = false;
+            document.getElementById('eval-btn').disabled = false;
+
+            // Get balance
+            const balanceHex = await window.ethereum.request({
+                method: 'eth_getBalance',
+                params: [account, 'latest'],
+            });
+            const balanceEth = parseInt(balanceHex, 16) / 1e18;
+            document.getElementById('wallet-balance').textContent = balanceEth.toFixed(4) + ' GEN';
+
+            // Load data
+            await loadPolicies();
+            await loadTransfers();
+
+        } catch (e) {
+            console.error(e);
+            showStatus('purchase-status', 'Connection failed: ' + e.message, 'error');
+        }
+    }
+
+    function disconnectWallet() {
+        account = null;
+        document.getElementById('wallet-info').style.display = 'none';
+        document.getElementById('connect-btn').style.display = 'block';
+        document.getElementById('purchase-btn').disabled = true;
+        document.getElementById('eval-btn').disabled = true;
+        document.getElementById('policies-list').innerHTML = '';
+        document.getElementById('transfers-list').innerHTML = '';
+    }
+
+    async function sendTransaction(to, data, value = '0x0') {
+        return await window.ethereum.request({
+            method: 'eth_sendTransaction',
+            params: [{
+                from: account,
+                to: to,
+                data: data,
+                value: value,
+            }],
+        });
+    }
+
+    async function callContract(functionName, args) {
+        const data = encodeFunctionCall(functionName, args);
+        const result = await window.ethereum.request({
+            method: 'eth_call',
+            params: [{
+                from: account,
+                to: CONTRACT,
+                data: data,
+            }, 'latest'],
+        });
+        return result;
+    }
+
+    async function purchasePolicy() {
+        if (!account) return;
+        
+        const flightNumber = document.getElementById('flight-number').value;
+        const flightDate = document.getElementById('flight-date').value;
+        const amount = document.getElementById('coverage-amount').value;
+        const claimant = document.getElementById('claimant-address').value || account;
+
+        try {
+            showStatus('purchase-status', 'Submitting transaction...', 'pending');
+
+            const valueHex = '0x' + Math.floor(parseFloat(amount) * 1e18).toString(16);
+            const data = encodeFunctionCall('purchasePolicy', [flightNumber, flightDate, claimant]);
+
+            const hash = await sendTransaction(CONTRACT, data, valueHex);
+
+            showStatus('purchase-status', `Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
+
+            // Wait for receipt (poll)
+            const receipt = await waitForReceipt(hash);
+            
+            if (receipt && receipt.status === '0x1') {
+                showStatus('purchase-status', `Policy purchased! View on <a href="${EXPLORER}/tx/${hash}" target="_blank">Explorer</a>`, 'success');
+                await loadPolicies();
+                await loadTransfers();
+            } else {
+                showStatus('purchase-status', 'Transaction reverted', 'error');
+            }
+        } catch (e) {
+            console.error(e);
+            showStatus('purchase-status', 'Error: ' + e.message, 'error');
+        }
+    }
+
+    async function evaluatePolicy() {
+        if (!account) return;
+
+        const policyId = parseInt(document.getElementById('eval-policy-id').value);
+        const flightStatus = document.getElementById('eval-status').value;
+        const delayMinutes = parseInt(document.getElementById('eval-delay').value);
+
+        try {
+            showStatus('eval-status', 'Submitting transaction...', 'pending');
+
+            const data = encodeFunctionCall('evaluatePolicy', [policyId, flightStatus, delayMinutes]);
+            const hash = await sendTransaction(CONTRACT, data);
+
+            showStatus('eval-status', `Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
+
+            const receipt = await waitForReceipt(hash);
+
+            if (receipt && receipt.status === '0x1') {
+                showStatus('eval-status', `Policy evaluated! View on <a href="${EXPLORER}/tx/${hash}" target="_blank">Explorer</a>`, 'success');
+                await loadPolicies();
+                await loadTransfers();
+            } else {
+                showStatus('eval-status', 'Transaction reverted', 'error');
+            }
+        } catch (e) {
+            console.error(e);
+            showStatus('eval-status', 'Error: ' + e.message, 'error');
+        }
+    }
+
+    async function waitForReceipt(hash, maxAttempts = 60) {
+        for (let i = 0; i < maxAttempts; i++) {
+            await new Promise(r => setTimeout(r, 5000));
+            try {
+                const receipt = await window.ethereum.request({
+                    method: 'eth_getTransactionReceipt',
+                    params: [hash],
+                });
+                if (receipt) return receipt;
+            } catch (e) {
+                // Continue polling
+            }
+        }
+        return null;
+    }
+
+    async function loadPolicies() {
+        if (!account) return;
+        
+        try {
+            let html = '';
+            for (let i = 0; i < 20; i++) {
+                try {
+                    const result = await callContract('getPolicy', [i]);
+                    const decoded = decodeStringReturn(result);
+                    const policy = JSON.parse(decoded);
+                    if (policy.exists === false) continue;
+
+                    const statusClass = policy.status.toLowerCase();
+                    const verdictClass = policy.verdict ? policy.verdict.toLowerCase() : '';
+                    const amountGen = (parseInt(policy.amount) / 1e18).toFixed(4);
+
+                    html += `
+                        <div class="transfer-item">
+                            <div class="info-row">
+                                <span class="info-label">Policy #${i}</span>
+                                <span class="pill ${statusClass}">${policy.status}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">${policy.flight_number} • ${policy.flight_date}</span>
+                                <span class="info-value">${amountGen} GEN</span>
+                            </div>
+                            ${policy.verdict ? `
+                            <div class="info-row">
+                                <span class="info-label">Verdict</span>
+                                <span class="pill ${verdictClass}">${policy.verdict} (${policy.delay_minutes} min)</span>
+                            </div>
+                            ` : '<div class="info-row"><span class="info-label" style="color:#ffd93d;">Pending evaluation</span></div>'}
+                        </div>
+                    `;
+                } catch (e) {
+                    break;
+                }
+            }
+
+            document.getElementById('policies-list').innerHTML = html || '<p style="color:#888; font-size:0.85rem;">No policies found</p>';
+        } catch (e) {
+            console.error(e);
+            document.getElementById('policies-list').innerHTML = '<p style="color:#ff6b6b;">Error loading policies</p>';
+        }
+    }
+
+    async function loadTransfers() {
+        if (!account) return;
+
+        try {
+            const result = await callContract('getEmittedTransfers', []);
+            const decoded = decodeStringReturn(result);
+            const transfers = JSON.parse(decoded);
+            
+            let html = '';
+            for (const [key, val] of Object.entries(transfers)) {
+                if (key === 'error') continue;
+                const t = typeof val === 'string' ? JSON.parse(val) : val;
+                const amountGen = (parseInt(t.amount) / 1e18).toFixed(4);
+                const typeClass = t.type;
+
+                html += `
+                    <div class="transfer-item">
+                        <div class="info-row">
+                            <span class="info-label">Transfer #${key}</span>
+                            <span class="pill ${typeClass}">${t.type.toUpperCase()}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">${t.flight_number} • ${t.delay_minutes} min delay</span>
+                            <span class="info-value">${amountGen} GEN</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">To</span>
+                            <span class="info-value">${t.recipient.slice(0, 10)}...</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            document.getElementById('transfers-list').innerHTML = html || '<p style="color:#888; font-size:0.85rem;">No transfers yet</p>';
+        } catch (e) {
+            console.error(e);
+            document.getElementById('transfers-list').innerHTML = '<p style="color:#ff6b6b;">Error loading transfers</p>';
+        }
+    }
+
+    function decodeStringReturn(hex) {
+        // Remove 0x prefix
+        hex = hex.slice(2);
+        // Skip offset (first 64 chars = 32 bytes)
+        // Skip length (next 64 chars = 32 bytes)
+        // Get actual string data
+        const lengthHex = hex.substr(64, 64);
+        const length = parseInt(lengthHex, 16);
+        const dataHex = hex.substr(128, length * 2);
+        let str = '';
+        for (let i = 0; i < dataHex.length; i += 2) {
+            str += String.fromCharCode(parseInt(dataHex.substr(i, 2), 16));
+        }
+        return str;
+    }
     </script>
 </body>
 </html>
