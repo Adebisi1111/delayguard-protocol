@@ -386,11 +386,35 @@
         }
 
         try {
+            // Verify we're on the correct chain
+            const currentChainId = await window.ethereum.request({ method: 'eth_chainId' });
+            if (currentChainId !== EXPECTED_CHAIN_ID) {
+                showStatus('purchase-status', `❌ Wrong network! Please switch to Bradbury testnet (chain ${EXPECTED_CHAIN_ID}). You are on chain ${currentChainId}.`, 'error');
+                return;
+            }
+
             setProcessing(true);
+            showStatus('purchase-status', '<span class="loading"></span>Estimating gas...', 'pending');
+
+            const valueWei = Math.floor(parseFloat(amount) * 1e18);
+            const valueHex = '0x' + valueWei.toString(16);
+            const data = encodeFunctionCall('purchasePolicy', [flightNumber, flightDate, claimant]);
+
+            // Try to estimate gas first
+            try {
+                const gasEstimate = await rpcCall('eth_estimateGas', [{
+                    from: account,
+                    to: CONTRACT,
+                    data: data,
+                    value: valueHex
+                }]);
+                console.log('Gas estimate:', gasEstimate);
+            } catch (gasError) {
+                console.log('Gas estimation failed (this is ok):', gasError.message);
+            }
+
             showStatus('purchase-status', '<span class="loading"></span>Submitting transaction...', 'pending');
 
-            const valueHex = '0x' + Math.floor(parseFloat(amount) * 1e18).toString(16);
-            const data = encodeFunctionCall('purchasePolicy', [flightNumber, flightDate, claimant]);
             const hash = await sendTransaction(CONTRACT, data, valueHex);
 
             showStatus('purchase-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
@@ -405,7 +429,17 @@
                 await loadTransfers();
                 await updateBalance();
             } else {
-                showStatus('purchase-status', '❌ Transaction reverted by contract', 'error');
+                // Try to get revert reason
+                try {
+                    const tx = await rpcCall('eth_getTransactionByHash', [hash]);
+                    if (tx && tx.input) {
+                        showStatus('purchase-status', '❌ Transaction reverted by contract. Check: 1) You have enough GEN for gas + coverage, 2) All fields are filled, 3) Policy ID is not already resolved.', 'error');
+                    } else {
+                        showStatus('purchase-status', '❌ Transaction reverted by contract', 'error');
+                    }
+                } catch (e) {
+                    showStatus('purchase-status', '❌ Transaction reverted by contract', 'error');
+                }
             }
         } catch (e) {
             console.error(e);
