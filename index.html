@@ -124,14 +124,14 @@
     <script>
     const CONTRACT = '0x318CBF3Ad6B0c57F6BFCA096C9b55665e08cb883';
     const EXPLORER = 'https://explorer-bradbury.genlayer.com';
-    const CHAIN_ID = '0x107d'; // 4221 in hex
+    const CHAIN_ID = '0x107d';
     const EXPECTED_CHAIN_ID = '0x107d';
     const RPC_URL = 'https://rpc-bradbury.genlayer.com';
 
     let account = null;
     let isProcessing = false;
 
-    // ABI selectors (first 4 bytes of keccak256)
+    // Function selectors (first 4 bytes of keccak256 signature)
     const SELECTORS = {
         'purchasePolicy': '0x42a7850a',
         'evaluatePolicy': '0x093913f4',
@@ -141,45 +141,80 @@
         'getTransfer': '0x7ec6cfca',
     };
 
+    // ABI encoder for function calls
     function encodeFunctionCall(functionName, args) {
-        let data = SELECTORS[functionName];
-        if (!data) throw new Error('Unknown function: ' + functionName);
-        
-        let encodedArgs = '';
-        for (const arg of args) {
-            if (typeof arg === 'string' && arg.startsWith('0x')) {
-                encodedArgs += arg.slice(2).padStart(64, '0');
+        const selector = SELECTORS[functionName];
+        if (!selector) throw new Error('Unknown function: ' + functionName);
+
+        // Separate head (static params + offsets) and data (dynamic params)
+        let head = '';
+        let data = '';
+        const dynamicOffsets = [];
+
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+
+            if (typeof arg === 'number' || typeof arg === 'bigint') {
+                // uint256 — static 32 bytes
+                head += BigInt(arg).toString(16).padStart(64, '0');
+            } else if (typeof arg === 'string' && isHexAddress(arg)) {
+                // address — static 32 bytes (left-padded)
+                head += arg.slice(2).toLowerCase().padStart(64, '0');
             } else if (typeof arg === 'string') {
-                const hex = stringToHex(arg);
-                encodedArgs += '0000000000000000000000000000000000000000000000000000000000000040';
-                encodedArgs += hex.length.toString(16).padStart(64, '0');
-                encodedArgs += hex.padEnd(Math.ceil(hex.length / 64) * 64, '0');
-            } else if (typeof arg === 'number' || typeof arg === 'bigint') {
-                const hex = BigInt(arg).toString(16);
-                encodedArgs += hex.padStart(64, '0');
+                // string — dynamic: write offset in head, data in data section
+                const strBytes = new TextEncoder().encode(arg);
+                const hex = bytesToHex(strBytes);
+                const paddedLen = Math.ceil(hex.length / 64) * 64;
+
+                // Calculate where this string's data will be in the data section
+                let dataSectionSize = 0;
+                for (const off of dynamicOffsets) {
+                    dataSectionSize = Math.max(dataSectionSize, off.offset + off.length);
+                }
+                const strDataOffset = dataSectionSize;
+
+                dynamicOffsets.push({
+                    offset: strDataOffset,
+                    length: 64 + paddedLen // 32 bytes for length + padded string data
+                });
+
+                // Write offset relative to start of params (after head)
+                head += (args.length * 32 + strDataOffset).toString(16).padStart(64, '0');
+
+                // Write length + data in data section
+                data += strBytes.length.toString(16).padStart(64, '0');
+                data += hex.padEnd(paddedLen, '0');
             }
         }
-        return data + encodedArgs;
+
+        return selector + head + data;
     }
 
-    function stringToHex(str) {
-        let hex = '';
-        for (let i = 0; i < str.length; i++) {
-            hex += str.charCodeAt(i).toString(16).padStart(2, '0');
+    function isHexAddress(str) {
+        return typeof str === 'string' && str.startsWith('0x') && /^[0-9a-fA-F]+$/.test(str.slice(2));
+    }
+
+    function bytesToHex(bytes) {
+        return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function hexToBytes(hex) {
+        const bytes = [];
+        for (let i = 0; i < hex.length; i += 2) {
+            bytes.push(parseInt(hex.substr(i, 2), 16));
         }
-        return hex;
+        return new Uint8Array(bytes);
     }
 
     function decodeStringReturn(hex) {
         hex = hex.slice(2);
+        // First 32 bytes: offset to string data
+        // Next 32 bytes: string length
+        // Then: string data
         const lengthHex = hex.substr(64, 64);
         const length = parseInt(lengthHex, 16);
         const dataHex = hex.substr(128, length * 2);
-        let str = '';
-        for (let i = 0; i < dataHex.length; i += 2) {
-            str += String.fromCharCode(parseInt(dataHex.substr(i, 2), 16));
-        }
-        return str;
+        return new TextDecoder().decode(hexToBytes(dataHex));
     }
 
     function showStatus(elementId, message, type) {
@@ -202,7 +237,7 @@
 
     async function connectWallet() {
         if (isProcessing) return;
-        
+
         try {
             if (!window.ethereum) {
                 showStatus('purchase-status', '❌ No wallet detected. Please install MetaMask or a Web3 wallet.', 'error');
@@ -211,24 +246,21 @@
 
             showStatus('purchase-status', '<span class="loading"></span>Connecting to wallet...', 'pending');
 
-            // Request account access
             const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
             account = accounts[0];
 
             // Auto-detect and auto-switch network
             const currentChainId = await window.ethereum.request({ method: 'eth_chainId' });
-            
+
             if (currentChainId !== EXPECTED_CHAIN_ID) {
                 showStatus('purchase-status', '<span class="loading"></span>Switching to Bradbury testnet...', 'pending');
-                
-                // Try to switch first (network might already be in wallet)
+
                 try {
                     await window.ethereum.request({
                         method: 'wallet_switchEthereumChain',
                         params: [{ chainId: EXPECTED_CHAIN_ID }],
                     });
                 } catch (switchError) {
-                    // Network not in wallet — add it
                     if (switchError.code === 4902 || switchError.data?.originalError?.code === 4902) {
                         showStatus('purchase-status', '<span class="loading"></span>Adding Bradbury testnet to MetaMask...', 'pending');
                         await window.ethereum.request({
@@ -241,7 +273,6 @@
                                 blockExplorerUrls: [EXPLORER],
                             }],
                         });
-                        // After adding, try switching again
                         await window.ethereum.request({
                             method: 'wallet_switchEthereumChain',
                             params: [{ chainId: EXPECTED_CHAIN_ID }],
@@ -254,20 +285,17 @@
                 }
             }
 
-            // Confirm final network
             const finalChainId = await window.ethereum.request({ method: 'eth_chainId' });
             if (finalChainId !== EXPECTED_CHAIN_ID) {
                 throw new Error('Failed to switch to Bradbury testnet');
             }
 
-            // Update UI
             document.getElementById('wallet-address').textContent = account.slice(0, 6) + '...' + account.slice(-4);
             document.getElementById('wallet-info').style.display = 'block';
             document.getElementById('connect-btn').style.display = 'none';
             document.getElementById('purchase-btn').disabled = false;
             document.getElementById('eval-btn').disabled = false;
 
-            // Get balance
             const balanceHex = await window.ethereum.request({
                 method: 'eth_getBalance',
                 params: [account, 'latest'],
@@ -277,11 +305,9 @@
 
             clearStatus('purchase-status');
 
-            // Load data
             await loadPolicies();
             await loadTransfers();
 
-            // Listen for account changes
             window.ethereum.on('accountsChanged', handleAccountsChanged);
             window.ethereum.on('chainChanged', () => window.location.reload());
 
@@ -316,7 +342,7 @@
         document.getElementById('transfers-list').innerHTML = '<div class="empty-state">Connect wallet to view transfers</div>';
         clearStatus('purchase-status');
         clearStatus('eval-status');
-        
+
         if (window.ethereum && window.ethereum.removeListener) {
             window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
         }
@@ -340,7 +366,7 @@
 
     async function purchasePolicy() {
         if (!account || isProcessing) return;
-        
+
         const flightNumber = document.getElementById('flight-number').value.trim();
         const flightDate = document.getElementById('flight-date').value;
         const amount = document.getElementById('coverage-amount').value;
@@ -370,7 +396,7 @@
             showStatus('purchase-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
 
             const receipt = await waitForReceipt(hash);
-            
+
             if (receipt && receipt.status === '0x1') {
                 showStatus('purchase-status', `✅ Policy purchased! <a href="${EXPLORER}/tx/${hash}" target="_blank">View on Explorer</a>`, 'success');
                 document.getElementById('flight-number').value = '';
@@ -468,11 +494,11 @@
 
     async function loadPolicies() {
         if (!account) return;
-        
+
         try {
             let html = '';
             let found = false;
-            
+
             for (let i = 0; i < 50; i++) {
                 try {
                     const result = await callContract('getPolicy', [i]);
@@ -522,10 +548,10 @@
             const result = await callContract('getEmittedTransfers', []);
             const decoded = decodeStringReturn(result);
             const transfers = JSON.parse(decoded);
-            
+
             let html = '';
             let count = 0;
-            
+
             for (const [key, val] of Object.entries(transfers)) {
                 if (key === 'error') continue;
                 const t = typeof val === 'string' ? JSON.parse(val) : val;
@@ -565,17 +591,14 @@
                 const accounts = await window.ethereum.request({ method: 'eth_accounts' });
                 if (accounts.length > 0) {
                     account = accounts[0];
-                    // Show the wallet address even if on wrong network
                     document.getElementById('wallet-address').textContent = account.slice(0, 6) + '...' + account.slice(-4);
                     document.getElementById('wallet-info').style.display = 'block';
                     document.getElementById('connect-btn').style.display = 'none';
-                    
-                    // If on wrong network, prompt to switch
+
                     const chainId = await window.ethereum.request({ method: 'eth_chainId' });
                     if (chainId !== EXPECTED_CHAIN_ID) {
                         showStatus('purchase-status', `<span class="loading"></span>Please switch to Bradbury testnet. <button onclick="connectWallet()" style="margin-top:0.5rem;">Switch Network</button>`, 'pending');
                     } else {
-                        // On correct network — enable everything
                         document.getElementById('purchase-btn').disabled = false;
                         document.getElementById('eval-btn').disabled = false;
 
