@@ -1,52 +1,70 @@
 # DelayGuard Protocol
 
-**Flight Insurance on GenLayer Bradbury Testnet**
+**Decentralized Flight Insurance on GenLayer Bradbury Testnet**
 
-Decentralized flight delay insurance. Purchase a policy, and if your flight is delayed by 30+ minutes, receive an automatic payout. If on time, the depositor gets a refund.
-
-**Live:** https://adebisi1111.github.io/delayguard-protocol/
-**Contract:** [`0x318CBF3Ad6B0c57F6BFCA096C9b55665e08cb883`](https://explorer-bradbury.genlayer.com/address/0x318CBF3Ad6B0c57F6BFCA096C9b55665e08cb883)
+Live: https://adebisi1111.github.io/delayguard-protocol/
+Contract: [`0x318CBF3Ad6B0c57F6BFCA096C9b55665e08cb883`](https://explorer-bradbury.genlayer.com/address/0x318CBF3Ad6B0c57F6BFCA096C9b55665e08cb883)
 
 ---
 
-## How It Works
+## What Is This?
 
-1. **Purchase Policy** — Enter flight number, date, and coverage amount (in GEN). Submit the transaction.
-2. **Wait** — After the flight date, evaluate the policy with the actual flight status.
-3. **Evaluate** — If DELAYED ≥ 30 min, the claimant receives the payout. If ON_TIME, the depositor gets a refund.
-4. **Transfer Recorded** — All payouts and refunds are recorded on-chain with full details.
+DelayGuard is a decentralized flight insurance protocol built on GenLayer's AI-native blockchain.
+
+1. **Purchase** — Buy a policy for any flight with GEN
+2. **Wait** — After the flight date, check the status
+3. **Evaluate** — If delayed ≥ 30 min → payout to claimant. If on time → refund to depositor
+4. **Recorded** — Every payout and refund is stored permanently on-chain
+
+---
+
+## Quick Start
+
+### Try It Now
+1. Open https://adebisi1111.github.io/delayguard-protocol/
+2. Connect MetaMask (add Bradbury testnet if needed)
+3. Purchase a policy
+4. Evaluate it after the flight date
+
+### Test Locally
+
+```bash
+# Clone
+git clone https://github.com/Adebisi1111/delayguard-protocol.git
+cd delayguard-protocol
+
+# Run all tests (requires GenLayer dev environment with .venv)
+cd genlayer-project
+.venv/bin/python -m pytest ../delayguard-protocol/tests/test_delayguard.py -v
+```
+
+**21 tests** covering basic flow, edge cases, security, and boundary conditions.
+
+### Deploy Your Own
+
+```bash
+cd delayguard-protocol
+npm install genlayer-js viem
+node scripts/deploy.mjs
+```
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Frontend (index.html)                                  │
-│  ─ MetaMask wallet connection                           │
-│  ─ Bradbury testnet (chain ID 72013)                    │
-│  ─ ABI-encoded contract calls                           │
-└────────────────────────┬────────────────────────────────┘
-                         │ eth_sendTransaction / eth_call
-┌────────────────────────▼────────────────────────────────┐
-│  GenLayer Bradbury Testnet                              │
-│                                                         │
-│  Contract: DelayGuardProtocol                           │
-│  Address: 0x318CBF3A...cb883                            │
-│                                                         │
-│  Methods:                                               │
-│    purchasePolicy(flight_number, flight_date, claimant) │
-│    evaluatePolicy(policy_id, flight_status, delay_min)  │
-│    getPolicy(policy_id) → JSON                          │
-│    getTransferCount() → {count}                         │
-│    getEmittedTransfers() → {key: JSON}                  │
-│                                                         │
-│  Storage:                                               │
-│    policies: TreeMap<u256, str>                         │
-│    emitted_transfers: TreeMap<str, str>                 │
-│    next_policy_id: u256                                 │
-│    transfer_count: u256                                 │
-└─────────────────────────────────────────────────────────┘
+Frontend (index.html)                    Bradbury Testnet
+┌────────────────────┐                  ┌──────────────────────────┐
+│ MetaMask wallet    │ ── eth_call ───► │ Contract:                │
+│ connection         │                  │ DelayGuardProtocol       │
+│                    │ ── eth_sendTx ─► │ 0x318CBF3A...cb883        │
+│ Purchase policy    │                  │                          │
+│ Evaluate policy    │ ◄── events ──── │ Methods:                 │
+│ View transfers     │                  │   purchasePolicy(...)    │
+└────────────────────┘                  │   evaluatePolicy(...)    │
+                                        │   getPolicy(...)         │
+                                        │   getEmittedTransfers()  │
+                                        └──────────────────────────┘
 ```
 
 ---
@@ -56,55 +74,70 @@ Decentralized flight delay insurance. Purchase a policy, and if your flight is d
 | Component | Technology |
 |-----------|-----------|
 | Contract | Python (GenVM) |
-| Network | GenLayer Bradbury Testnet |
-| Frontend | Vanilla HTML/JS (no build) |
+| Network | GenLayer Bradbury Testnet (chain 72013) |
+| Frontend | Vanilla HTML/JS (no build step) |
 | Wallet | MetaMask / injected Web3 |
-| Storage | GenLayer TreeMap (on-chain) |
-| Verification | 5/5 validators consensus |
+| Tests | pytest + gltest direct fixtures |
+| Deployment | genlayer-js |
 
 ---
 
-## Quick Start
+## Contract Methods
 
-### Try It Live
-1. Open https://adebisi1111.github.io/delayguard-protocol/
-2. Connect MetaMask (switch to Bradbury testnet)
-3. Purchase a policy
-4. Evaluate it after your flight date
+| Method | Type | Description |
+|--------|------|-------------|
+| `purchasePolicy(flight_number, flight_date, claimant)` | payable write | Purchase a policy |
+| `evaluatePolicy(policy_id, flight_status, delay_minutes)` | write | Evaluate and trigger payout/refund |
+| `getPolicy(policy_id)` | view | Get policy JSON |
+| `getTransferCount()` | view | Get total transfer count |
+| `getEmittedTransfers()` | view | Get all transfers |
+| `getTransfer(index)` | view | Get specific transfer |
 
-### Local Development
+### Parameters
 
-```bash
-# Clone
-git clone https://github.com/Adebisi1111/delayguard-protocol.git
-cd delayguard-protocol
-
-# Run direct tests (fast, no Studio needed)
-cd genlayer-project  # or your genlayer dev environment
-pytest ../delayguard-protocol/tests/test_delayguard.py -v
-```
-
-### Deploy Your Own Contract
-
-```bash
-cd delayguard-protocol
-
-# Requires Node.js + genlayer-js
-npm install
-
-# Deploy to Bradbury (requires private key with Bradbury GEN)
-node deploy_and_verify.mjs
-```
+- `flight_number`: string, e.g. "BA173"
+- `flight_date`: string, e.g. "2026-09-15"
+- `claimant`: hex address, e.g. "0x1234..."
+- `flight_status`: "DELAYED" or "ON_TIME"
+- `delay_minutes`: integer, ≥ 30 triggers payout
 
 ---
 
-## Contract Details
+## Test Coverage (21 tests)
 
-### Networks
+**Basic Flow (6)**
+- Purchase policy with funds
+- Reject purchase without funds
+- DELAYED evaluation → payout
+- ON_TIME evaluation → refund
+- Non-existent policy handling
+- Transfer count incrementing
 
-| Network | Chain ID | RPC | Explorer |
-|---------|----------|-----|----------|
-| **Bradbury Testnet** | 72013 (0x1194D) | https://studio.genlayer.com/api | https://explorer-bradbury.genlayer.com |
+**Security & Validation (5)**
+- Double-evaluate rejection
+- Invalid flight status rejection
+- Negative delay rejection
+- Empty inputs rejection
+- Non-existent policy evaluation
+
+**Edge Cases (10)**
+- Boundary: 29 min → refund
+- Boundary: 30 min → payout
+- Transfer data integrity
+- Multiple users independent policies
+- Specific transfer index retrieval
+- Non-existent transfer retrieval
+- Case-insensitive status
+- Sequential policy IDs
+- Transfer accumulation
+
+---
+
+## Networks
+
+| Network | Chain ID | RPC | Status |
+|---------|----------|-----|--------|
+| **Bradbury Testnet** | 72013 (0x1194D) | https://studio.genlayer.com/api | ✅ Active |
 
 ### Contract Addresses
 
@@ -114,39 +147,29 @@ node deploy_and_verify.mjs
 
 ---
 
-## Testing
+## FAQ
 
-### Direct Mode (local, fast)
-```bash
-cd genlayer-project
-.venv/bin/python -m pytest ../delayguard-protocol/tests/test_delayguard.py -v
-```
+**What happens if my flight is delayed by exactly 30 minutes?**
+Payout. The threshold is ≥ 30 minutes.
 
-**6 tests** covering:
-- Policy purchase with funds
-- Policy rejection without funds
-- DELAYED evaluation → payout
-- ON_TIME evaluation → refund
-- Non-existent policy handling
-- Transfer count incrementing
+**Can I evaluate a policy twice?**
+No. Once a policy is resolved (DELAYED or ON_TIME), it's final.
 
-### On-Chain Verification
-- Both payout and refund paths tested on Bradbury testnet
-- Consensus: 5/5 validators agree
-- Transactions finalized within ~30 seconds
+**Who can call evaluatePolicy?**
+Anyone. The flight status is provided by the caller (oracle pattern).
 
----
+**Why not automatic LLM verification?**
+The current design uses caller-provided status for predictability. LLM oracle integration is planned.
 
-## Roadmap
-
-- [ ] LLM oracle integration for automatic flight status verification
-- [ ] Multi-chain deployment (Asimov, Studio)
-- [ ] Governance for parameter tuning (thresholds, fees)
-- [ ] Advanced frontend with React + proper wallet management
-- [ ] Mobile-optimized PWA
+**What currency is used?**
+GEN (GenLayer's native token) on the Bradbury testnet.
 
 ---
 
 ## License
 
 MIT
+
+---
+
+*Built with GenLayer — AI-native blockchain for intelligent contracts.*
