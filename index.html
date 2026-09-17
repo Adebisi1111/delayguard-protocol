@@ -400,6 +400,17 @@
             const valueHex = '0x' + valueWei.toString(16);
             const data = encodeFunctionCall('purchasePolicy', [flightNumber, flightDate, claimant]);
 
+            // Debug: show what's being sent
+            console.log('Purchase Policy:');
+            console.log('  flightNumber:', flightNumber);
+            console.log('  flightDate:', flightDate);
+            console.log('  claimant:', claimant);
+            console.log('  amount:', amount, 'GEN');
+            console.log('  valueWei:', valueWei);
+            console.log('  valueHex:', valueHex);
+            console.log('  data:', data);
+            console.log('  data length:', data.length);
+
             // Try to estimate gas first
             try {
                 const gasEstimate = await rpcCall('eth_estimateGas', [{
