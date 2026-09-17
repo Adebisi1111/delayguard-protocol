@@ -129,21 +129,107 @@
     const EXPECTED_CHAIN_ID = '0x107d';
     const RPC_URL = 'https://rpc-bradbury.genlayer.com';
 
-    // Contract ABI
-    const ABI = [
-        "function purchasePolicy(string flight_number, string flight_date, string claimant) payable returns (uint256)",
-        "function evaluatePolicy(uint256 policy_id, string flight_status, uint256 delay_minutes) returns (string)",
-        "function getPolicy(uint256 policy_id) view returns (string)",
-        "function getTransferCount() view returns (string)",
-        "function getEmittedTransfers() view returns (string)",
-        "function getTransfer(string index) view returns (string)"
-    ];
+    // ABI types for encoding
+    const coder = new ethers.AbiCoder();
 
-    let provider = null;
-    let signer = null;
-    let contract = null;
+    // Function selectors (first 4 bytes of keccak256 of function signature)
+    const SELECTORS = {
+        'purchasePolicy': '0x42a7850a',
+        'evaluatePolicy': '0x093913f4',
+        'getPolicy': '0x2b07fce3',
+        'getTransferCount': '0x040e55f5',
+        'getEmittedTransfers': '0xbf341512',
+        'getTransfer': '0x7ec6cfca',
+    };
+
     let account = null;
     let isProcessing = false;
+
+    // Proper ABI encoding using ethers
+    function encodeFunctionCall(functionName, args) {
+        const selector = SELECTORS[functionName];
+        if (!selector) throw new Error('Unknown function: ' + functionName);
+        
+        let types = [];
+        let values = [];
+        
+        for (const arg of args) {
+            if (typeof arg === 'number') {
+                types.push('uint256');
+                values.push(BigInt(arg));
+            } else if (typeof arg === 'bigint') {
+                types.push('uint256');
+                values.push(arg);
+            } else if (typeof arg === 'string' && isHexAddress(arg)) {
+                types.push('address');
+                values.push(arg);
+            } else if (typeof arg === 'string') {
+                types.push('string');
+                values.push(arg);
+            }
+        }
+        
+        const encoded = coder.encode(types, values);
+        return selector + encoded.slice(2);
+    }
+
+    function isHexAddress(str) {
+        return typeof str === 'string' && str.startsWith('0x') && /^[0-9a-fA-F]+$/.test(str.slice(2));
+    }
+
+    function decodeStringReturn(hex) {
+        try {
+            // Remove 0x prefix
+            if (hex.startsWith('0x')) hex = hex.slice(2);
+            
+            // For dynamic string return: offset (32 bytes) + length (32 bytes) + data
+            const lengthHex = hex.substr(64, 64);
+            const length = parseInt(lengthHex, 16);
+            const dataHex = hex.substr(128, length * 2);
+            
+            // Convert hex to string
+            let str = '';
+            for (let i = 0; i < dataHex.length; i += 2) {
+                str += String.fromCharCode(parseInt(dataHex.substr(i, 2), 16));
+            }
+            return str;
+        } catch (e) {
+            console.error('Decode error:', e);
+            return null;
+        }
+    }
+
+    // Custom RPC provider (avoids ethers.js issues with Bradbury RPC)
+    async function rpcCall(method, params) {
+        const response = await fetch(RPC_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                method: method,
+                params: params,
+                id: Date.now()
+            })
+        });
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error.message || 'RPC Error');
+        }
+        return data.result;
+    }
+
+    async function callContract(functionName, args) {
+        const data = encodeFunctionCall(functionName, args);
+        const result = await rpcCall('eth_call', [{ to: CONTRACT, data: data }, 'latest']);
+        return result;
+    }
+
+    async function sendTransaction(to, data, value = '0x0') {
+        return await window.ethereum.request({
+            method: 'eth_sendTransaction',
+            params: [{ from: account, to: to, data: data, value: value }]
+        });
+    }
 
     function showStatus(elementId, message, type) {
         const el = document.getElementById(elementId);
@@ -174,7 +260,6 @@
 
             showStatus('purchase-status', '<span class="loading"></span>Connecting to wallet...', 'pending');
 
-            // Request account access
             const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
             account = accounts[0];
 
@@ -220,11 +305,6 @@
                 throw new Error('Failed to switch to Bradbury testnet');
             }
 
-            // Setup ethers provider and contract
-            provider = new ethers.BrowserProvider(window.ethereum);
-            signer = await provider.getSigner();
-            contract = new ethers.Contract(CONTRACT, ABI, signer);
-
             // Update UI
             document.getElementById('wallet-address').textContent = account.slice(0, 6) + '...' + account.slice(-4);
             document.getElementById('wallet-info').style.display = 'block';
@@ -232,9 +312,10 @@
             document.getElementById('purchase-btn').disabled = false;
             document.getElementById('eval-btn').disabled = false;
 
-            // Get balance
-            const balance = await provider.getBalance(account);
-            document.getElementById('wallet-balance').textContent = parseFloat(ethers.formatEther(balance)).toFixed(4) + ' GEN';
+            // Get balance via custom RPC
+            const balanceHex = await rpcCall('eth_getBalance', [account, 'latest']);
+            const balanceEth = parseInt(balanceHex, 16) / 1e18;
+            document.getElementById('wallet-balance').textContent = balanceEth.toFixed(4) + ' GEN';
 
             clearStatus('purchase-status');
 
@@ -269,9 +350,6 @@
 
     function disconnectWallet() {
         account = null;
-        provider = null;
-        signer = null;
-        contract = null;
         document.getElementById('wallet-info').style.display = 'none';
         document.getElementById('connect-btn').style.display = 'block';
         document.getElementById('purchase-btn').disabled = true;
@@ -287,7 +365,7 @@
     }
 
     async function purchasePolicy() {
-        if (!account || isProcessing || !contract) return;
+        if (!account || isProcessing) return;
 
         const flightNumber = document.getElementById('flight-number').value.trim();
         const flightDate = document.getElementById('flight-date').value;
@@ -311,16 +389,16 @@
             setProcessing(true);
             showStatus('purchase-status', '<span class="loading"></span>Submitting transaction...', 'pending');
 
-            const tx = await contract.purchasePolicy(flightNumber, flightDate, claimant, {
-                value: ethers.parseEther(amount)
-            });
+            const valueHex = '0x' + Math.floor(parseFloat(amount) * 1e18).toString(16);
+            const data = encodeFunctionCall('purchasePolicy', [flightNumber, flightDate, claimant]);
+            const hash = await sendTransaction(CONTRACT, data, valueHex);
 
-            showStatus('purchase-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${tx.hash}" target="_blank">${tx.hash.slice(0, 10)}...</a>`, 'pending');
+            showStatus('purchase-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
 
-            const receipt = await tx.wait();
+            const receipt = await waitForReceipt(hash);
 
-            if (receipt && receipt.status === 1) {
-                showStatus('purchase-status', `✅ Policy purchased! <a href="${EXPLORER}/tx/${tx.hash}" target="_blank">View on Explorer</a>`, 'success');
+            if (receipt && receipt.status === '0x1') {
+                showStatus('purchase-status', `✅ Policy purchased! <a href="${EXPLORER}/tx/${hash}" target="_blank">View on Explorer</a>`, 'success');
                 document.getElementById('flight-number').value = '';
                 document.getElementById('claimant-address').value = '';
                 await loadPolicies();
@@ -331,10 +409,10 @@
             }
         } catch (e) {
             console.error(e);
-            if (e.code === 4001 || e.code === 'ACTION_REJECTED') {
+            if (e.code === 4001) {
                 showStatus('purchase-status', '❌ Transaction rejected by user', 'error');
             } else {
-                showStatus('purchase-status', '❌ Error: ' + (e.reason || e.message), 'error');
+                showStatus('purchase-status', '❌ Error: ' + e.message, 'error');
             }
         } finally {
             setProcessing(false);
@@ -342,7 +420,7 @@
     }
 
     async function evaluatePolicy() {
-        if (!account || isProcessing || !contract) return;
+        if (!account || isProcessing) return;
 
         const policyId = parseInt(document.getElementById('eval-policy-id').value);
         const flightStatus = document.getElementById('eval-status').value;
@@ -361,15 +439,16 @@
             setProcessing(true);
             showStatus('eval-status', '<span class="loading"></span>Submitting transaction...', 'pending');
 
-            const tx = await contract.evaluatePolicy(policyId, flightStatus, delayMinutes);
+            const data = encodeFunctionCall('evaluatePolicy', [policyId, flightStatus, delayMinutes]);
+            const hash = await sendTransaction(CONTRACT, data);
 
-            showStatus('eval-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${tx.hash}" target="_blank">${tx.hash.slice(0, 10)}...</a>`, 'pending');
+            showStatus('eval-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
 
-            const receipt = await tx.wait();
+            const receipt = await waitForReceipt(hash);
 
-            if (receipt && receipt.status === 1) {
+            if (receipt && receipt.status === '0x1') {
                 const action = flightStatus === 'DELAYED' ? 'Payout' : 'Refund';
-                showStatus('eval-status', `✅ Policy evaluated! ${action} triggered. <a href="${EXPLORER}/tx/${tx.hash}" target="_blank">View on Explorer</a>`, 'success');
+                showStatus('eval-status', `✅ Policy evaluated! ${action} triggered. <a href="${EXPLORER}/tx/${hash}" target="_blank">View on Explorer</a>`, 'success');
                 await loadPolicies();
                 await loadTransfers();
             } else {
@@ -377,24 +456,38 @@
             }
         } catch (e) {
             console.error(e);
-            if (e.code === 4001 || e.code === 'ACTION_REJECTED') {
+            if (e.code === 4001) {
                 showStatus('eval-status', '❌ Transaction rejected by user', 'error');
             } else {
-                showStatus('eval-status', '❌ Error: ' + (e.reason || e.message), 'error');
+                showStatus('eval-status', '❌ Error: ' + e.message, 'error');
             }
         } finally {
             setProcessing(false);
         }
     }
 
+    async function waitForReceipt(hash, maxAttempts = 60) {
+        for (let i = 0; i < maxAttempts; i++) {
+            await new Promise(r => setTimeout(r, 5000));
+            try {
+                const receipt = await rpcCall('eth_getTransactionReceipt', [hash]);
+                if (receipt) return receipt;
+            } catch (e) {
+                // Continue polling
+            }
+        }
+        return null;
+    }
+
     async function updateBalance() {
-        if (!account || !provider) return;
-        const balance = await provider.getBalance(account);
-        document.getElementById('wallet-balance').textContent = parseFloat(ethers.formatEther(balance)).toFixed(4) + ' GEN';
+        if (!account) return;
+        const balanceHex = await rpcCall('eth_getBalance', [account, 'latest']);
+        const balanceEth = parseInt(balanceHex, 16) / 1e18;
+        document.getElementById('wallet-balance').textContent = balanceEth.toFixed(4) + ' GEN';
     }
 
     async function loadPolicies() {
-        if (!account || !contract) return;
+        if (!account) return;
 
         try {
             let html = '';
@@ -402,8 +495,10 @@
 
             for (let i = 0; i < 50; i++) {
                 try {
-                    const policyRaw = await contract.getPolicy(i);
-                    const policy = JSON.parse(policyRaw);
+                    const result = await callContract('getPolicy', [i]);
+                    const decoded = decodeStringReturn(result);
+                    if (!decoded) break;
+                    const policy = JSON.parse(decoded);
                     if (policy.exists === false) break;
                     found = true;
 
@@ -442,11 +537,16 @@
     }
 
     async function loadTransfers() {
-        if (!account || !contract) return;
+        if (!account) return;
 
         try {
-            const transfersRaw = await contract.getEmittedTransfers();
-            const transfers = JSON.parse(transfersRaw);
+            const result = await callContract('getEmittedTransfers', []);
+            const decoded = decodeStringReturn(result);
+            if (!decoded) {
+                document.getElementById('transfers-list').innerHTML = '<div class="empty-state">Error decoding transfers</div>';
+                return;
+            }
+            const transfers = JSON.parse(decoded);
 
             let html = '';
             let count = 0;
@@ -498,15 +598,12 @@
                     if (chainId !== EXPECTED_CHAIN_ID) {
                         showStatus('purchase-status', `<span class="loading"></span>Please switch to Bradbury testnet. <button onclick="connectWallet()" style="margin-top:0.5rem;">Switch Network</button>`, 'pending');
                     } else {
-                        // Setup contract for read-only operations
-                        provider = new ethers.BrowserProvider(window.ethereum);
-                        contract = new ethers.Contract(CONTRACT, ABI, provider);
-                        
                         document.getElementById('purchase-btn').disabled = false;
                         document.getElementById('eval-btn').disabled = false;
 
-                        const balance = await provider.getBalance(account);
-                        document.getElementById('wallet-balance').textContent = parseFloat(ethers.formatEther(balance)).toFixed(4) + ' GEN';
+                        const balanceHex = await rpcCall('eth_getBalance', [account, 'latest']);
+                        const balanceEth = parseInt(balanceHex, 16) / 1e18;
+                        document.getElementById('wallet-balance').textContent = balanceEth.toFixed(4) + ' GEN';
 
                         await loadPolicies();
                         await loadTransfers();
