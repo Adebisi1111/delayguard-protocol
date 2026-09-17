@@ -15,13 +15,14 @@
         label { display: block; font-size: 0.85rem; color: #888; margin-bottom: 0.3rem; margin-top: 0.8rem; }
         input, select { width: 100%; padding: 0.75rem; background: #0a0a0f; border: 1px solid #2a2a3a; border-radius: 8px; color: #e0e0e0; font-size: 1rem; }
         input:focus, select:focus { outline: none; border-color: #00d4aa; }
-        button { width: 100%; padding: 0.9rem; background: #00d4aa; color: #0a0a0f; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 1rem; }
-        button:hover { background: #00b894; }
+        button { width: 100%; padding: 0.9rem; background: #00d4aa; color: #0a0a0f; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 1rem; transition: all 0.2s; }
+        button:hover:not(:disabled) { background: #00b894; transform: translateY(-1px); }
+        button:active:not(:disabled) { transform: translateY(0); }
         button:disabled { background: #333; color: #666; cursor: not-allowed; }
-        .status { padding: 0.75rem; background: #0a0a0f; border-radius: 8px; margin-top: 0.8rem; font-size: 0.85rem; word-break: break-all; }
-        .status.success { color: #00d4aa; border: 1px solid #00d4aa33; }
-        .status.error { color: #ff6b6b; border: 1px solid #ff6b6b33; }
-        .status.pending { color: #ffd93d; border: 1px solid #ffd93d33; }
+        .status { padding: 0.75rem; background: #0a0a0f; border-radius: 8px; margin-top: 0.8rem; font-size: 0.85rem; word-break: break-all; display: none; }
+        .status.success { color: #00d4aa; border: 1px solid #00d4aa33; display: block; }
+        .status.error { color: #ff6b6b; border: 1px solid #ff6b6b33; display: block; }
+        .status.pending { color: #ffd93d; border: 1px solid #ffd93d33; display: block; }
         .info-row { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid #1a1a2a; }
         .info-row:last-child { border-bottom: none; }
         .info-label { color: #888; font-size: 0.85rem; }
@@ -39,12 +40,21 @@
         .transfer-item { padding: 0.5rem; background: #0a0a0f; border-radius: 8px; margin-bottom: 0.5rem; }
         a { color: #00d4aa; text-decoration: none; }
         a:hover { text-decoration: underline; }
+        .loading { display: inline-block; width: 12px; height: 12px; border: 2px solid #ffd93d33; border-top-color: #ffd93d; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 0.5rem; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .empty-state { text-align: center; padding: 1rem; color: #666; font-size: 0.85rem; }
+        .network-badge { display: inline-block; padding: 0.2rem 0.5rem; background: #00d4aa22; color: #00d4aa; border-radius: 6px; font-size: 0.7rem; margin-left: 0.5rem; }
+        @media (max-width: 480px) {
+            .container { padding: 1rem 0.5rem; }
+            h1 { font-size: 1.4rem; }
+            .card { padding: 1rem; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>DelayGuard Protocol</h1>
-        <p class="subtitle">Flight Insurance on GenLayer Bradbury Testnet</p>
+        <p class="subtitle">Flight Insurance on GenLayer Bradbury Testnet <span class="network-badge">BRADBURY</span></p>
 
         <div class="card">
             <h2>Wallet</h2>
@@ -58,7 +68,7 @@
                     <span class="info-label">Balance</span>
                     <span class="info-value" id="wallet-balance">—</span>
                 </div>
-                <button onclick="disconnectWallet()" style="margin-top:0.8rem; background:#ff6b6b;">Disconnect</button>
+                <button onclick="disconnectWallet()" style="margin-top:0.8rem; background:#ff6b6b; color:white;">Disconnect</button>
             </div>
         </div>
 
@@ -77,19 +87,19 @@
             <input id="claimant-address" placeholder="0x...">
 
             <button id="purchase-btn" onclick="purchasePolicy()" disabled>Purchase Policy</button>
-            <div id="purchase-status"></div>
+            <div id="purchase-status" class="status"></div>
         </div>
 
         <div class="card">
             <h2>My Policies</h2>
             <button onclick="loadPolicies()" style="margin-top:0;">Refresh</button>
-            <div id="policies-list"></div>
+            <div id="policies-list"><div class="empty-state">Connect wallet to view policies</div></div>
         </div>
 
         <div class="card">
             <h2>Evaluate Policy (Trigger Payout/Refund)</h2>
             <label>Policy ID</label>
-            <input id="eval-policy-id" type="number" placeholder="0" value="0">
+            <input id="eval-policy-id" type="number" placeholder="0" value="0" min="0">
 
             <label>Flight Status</label>
             <select id="eval-status">
@@ -98,60 +108,56 @@
             </select>
 
             <label>Delay Minutes</label>
-            <input id="eval-delay" type="number" placeholder="75" value="75">
+            <input id="eval-delay" type="number" placeholder="75" value="75" min="0">
 
             <button id="eval-btn" onclick="evaluatePolicy()" disabled>Evaluate</button>
-            <div id="eval-status"></div>
+            <div id="eval-status" class="status"></div>
         </div>
 
         <div class="card">
             <h2>Transfer History</h2>
             <button onclick="loadTransfers()" style="margin-top:0;">Refresh</button>
-            <div id="transfers-list"></div>
+            <div id="transfers-list"><div class="empty-state">Connect wallet to view transfers</div></div>
         </div>
     </div>
 
     <script>
     const CONTRACT = '0x318CBF3Ad6B0c57F6BFCA096C9b55665e08cb883';
     const EXPLORER = 'https://explorer-bradbury.genlayer.com';
-    const CHAIN_ID = '0x1194D'; // 72013 in hex
+    const CHAIN_ID = '0x1194D';
+    const EXPECTED_CHAIN_ID = '0x1194D';
 
     let account = null;
+    let isProcessing = false;
 
-    // Simple ABI encoder for function calls
+    // ABI selectors (first 4 bytes of keccak256)
+    const SELECTORS = {
+        'purchasePolicy': '0x42a7850a',
+        'evaluatePolicy': '0x093913f4',
+        'getPolicy': '0x2b07fce3',
+        'getTransferCount': '0x040e55f5',
+        'getEmittedTransfers': '0xbf341512',
+        'getTransfer': '0x7ec6cfca',
+    };
+
     function encodeFunctionCall(functionName, args) {
-        // Pre-encoded function selectors (first 4 bytes of keccak256)
-        const selectors = {
-            'purchasePolicy': '0x42a7850a',
-            'evaluatePolicy': '0x093913f4',
-            'getPolicy': '0x2b07fce3',
-            'getTransferCount': '0x040e55f5',
-            'getEmittedTransfers': '0xbf341512',
-            'getTransfer': '0x7ec6cfca',
-        };
-        
-        let data = selectors[functionName];
+        let data = SELECTORS[functionName];
         if (!data) throw new Error('Unknown function: ' + functionName);
         
-        // Encode arguments
         let encodedArgs = '';
         for (const arg of args) {
             if (typeof arg === 'string' && arg.startsWith('0x')) {
-                // Address: pad to 32 bytes
                 encodedArgs += arg.slice(2).padStart(64, '0');
             } else if (typeof arg === 'string') {
-                // String: offset + length + data
                 const hex = stringToHex(arg);
-                encodedArgs += '0000000000000000000000000000000000000000000000000000000000000040'; // offset
-                encodedArgs += hex.length.toString(16).padStart(64, '0'); // length
-                encodedArgs += hex.padEnd(Math.ceil(hex.length / 64) * 64, '0'); // data
+                encodedArgs += '0000000000000000000000000000000000000000000000000000000000000040';
+                encodedArgs += hex.length.toString(16).padStart(64, '0');
+                encodedArgs += hex.padEnd(Math.ceil(hex.length / 64) * 64, '0');
             } else if (typeof arg === 'number' || typeof arg === 'bigint') {
-                // Number: 32 bytes
                 const hex = BigInt(arg).toString(16);
                 encodedArgs += hex.padStart(64, '0');
             }
         }
-        
         return data + encodedArgs;
     }
 
@@ -163,42 +169,73 @@
         return hex;
     }
 
+    function decodeStringReturn(hex) {
+        hex = hex.slice(2);
+        const lengthHex = hex.substr(64, 64);
+        const length = parseInt(lengthHex, 16);
+        const dataHex = hex.substr(128, length * 2);
+        let str = '';
+        for (let i = 0; i < dataHex.length; i += 2) {
+            str += String.fromCharCode(parseInt(dataHex.substr(i, 2), 16));
+        }
+        return str;
+    }
+
     function showStatus(elementId, message, type) {
         const el = document.getElementById(elementId);
         el.className = 'status ' + type;
         el.innerHTML = message;
-        el.style.display = 'block';
+    }
+
+    function clearStatus(elementId) {
+        const el = document.getElementById(elementId);
+        el.className = 'status';
+        el.innerHTML = '';
+    }
+
+    function setProcessing(processing) {
+        isProcessing = processing;
+        document.getElementById('purchase-btn').disabled = processing || !account;
+        document.getElementById('eval-btn').disabled = processing || !account;
     }
 
     async function connectWallet() {
+        if (isProcessing) return;
+        
         try {
             if (!window.ethereum) {
-                showStatus('purchase-status', 'No wallet detected. Please install MetaMask or a Web3 wallet.', 'error');
+                showStatus('purchase-status', '❌ No wallet detected. Please install MetaMask or a Web3 wallet.', 'error');
                 return;
             }
 
-            // Request account access
+            showStatus('purchase-status', '<span class="loading"></span>Connecting...', 'pending');
+
             const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
             account = accounts[0];
 
-            // Switch to Bradbury network
-            try {
-                await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: CHAIN_ID }],
-                });
-            } catch (switchError) {
-                if (switchError.code === 4902) {
+            // Check if on correct network
+            const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+            if (chainId !== EXPECTED_CHAIN_ID) {
+                try {
                     await window.ethereum.request({
-                        method: 'wallet_addEthereumChain',
-                        params: [{
-                            chainId: CHAIN_ID,
-                            chainName: 'GenLayer Bradbury Testnet',
-                            rpcUrls: ['https://studio.genlayer.com/api'],
-                            nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
-                            blockExplorerUrls: [EXPLORER],
-                        }],
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: EXPECTED_CHAIN_ID }],
                     });
+                } catch (switchError) {
+                    if (switchError.code === 4902) {
+                        await window.ethereum.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [{
+                                chainId: EXPECTED_CHAIN_ID,
+                                chainName: 'GenLayer Bradbury Testnet',
+                                rpcUrls: ['https://studio.genlayer.com/api'],
+                                nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
+                                blockExplorerUrls: [EXPLORER],
+                            }],
+                        });
+                    } else {
+                        throw new Error('Please switch to Bradbury testnet');
+                    }
                 }
             }
 
@@ -217,13 +254,30 @@
             const balanceEth = parseInt(balanceHex, 16) / 1e18;
             document.getElementById('wallet-balance').textContent = balanceEth.toFixed(4) + ' GEN';
 
+            clearStatus('purchase-status');
+
             // Load data
             await loadPolicies();
             await loadTransfers();
 
+            // Listen for account changes
+            window.ethereum.on('accountsChanged', handleAccountsChanged);
+            window.ethereum.on('chainChanged', () => window.location.reload());
+
         } catch (e) {
             console.error(e);
-            showStatus('purchase-status', 'Connection failed: ' + e.message, 'error');
+            showStatus('purchase-status', '❌ Connection failed: ' + e.message, 'error');
+        }
+    }
+
+    function handleAccountsChanged(accounts) {
+        if (accounts.length === 0) {
+            disconnectWallet();
+        } else if (accounts[0] !== account) {
+            account = accounts[0];
+            document.getElementById('wallet-address').textContent = account.slice(0, 6) + '...' + account.slice(-4);
+            loadPolicies();
+            loadTransfers();
         }
     }
 
@@ -233,19 +287,20 @@
         document.getElementById('connect-btn').style.display = 'block';
         document.getElementById('purchase-btn').disabled = true;
         document.getElementById('eval-btn').disabled = true;
-        document.getElementById('policies-list').innerHTML = '';
-        document.getElementById('transfers-list').innerHTML = '';
+        document.getElementById('policies-list').innerHTML = '<div class="empty-state">Connect wallet to view policies</div>';
+        document.getElementById('transfers-list').innerHTML = '<div class="empty-state">Connect wallet to view transfers</div>';
+        clearStatus('purchase-status');
+        clearStatus('eval-status');
+        
+        if (window.ethereum && window.ethereum.removeListener) {
+            window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        }
     }
 
     async function sendTransaction(to, data, value = '0x0') {
         return await window.ethereum.request({
             method: 'eth_sendTransaction',
-            params: [{
-                from: account,
-                to: to,
-                data: data,
-                value: value,
-            }],
+            params: [{ from: account, to, data, value }],
         });
     }
 
@@ -253,76 +308,110 @@
         const data = encodeFunctionCall(functionName, args);
         const result = await window.ethereum.request({
             method: 'eth_call',
-            params: [{
-                from: account,
-                to: CONTRACT,
-                data: data,
-            }, 'latest'],
+            params: [{ from: account, to: CONTRACT, data }, 'latest'],
         });
         return result;
     }
 
     async function purchasePolicy() {
-        if (!account) return;
+        if (!account || isProcessing) return;
         
-        const flightNumber = document.getElementById('flight-number').value;
+        const flightNumber = document.getElementById('flight-number').value.trim();
         const flightDate = document.getElementById('flight-date').value;
         const amount = document.getElementById('coverage-amount').value;
-        const claimant = document.getElementById('claimant-address').value || account;
+        const claimant = document.getElementById('claimant-address').value.trim() || account;
+
+        if (!flightNumber) {
+            showStatus('purchase-status', '❌ Flight number is required', 'error');
+            return;
+        }
+        if (!flightDate) {
+            showStatus('purchase-status', '❌ Flight date is required', 'error');
+            return;
+        }
+        if (!amount || parseFloat(amount) <= 0) {
+            showStatus('purchase-status', '❌ Coverage amount must be greater than 0', 'error');
+            return;
+        }
 
         try {
-            showStatus('purchase-status', 'Submitting transaction...', 'pending');
+            setProcessing(true);
+            showStatus('purchase-status', '<span class="loading"></span>Submitting transaction...', 'pending');
 
             const valueHex = '0x' + Math.floor(parseFloat(amount) * 1e18).toString(16);
             const data = encodeFunctionCall('purchasePolicy', [flightNumber, flightDate, claimant]);
-
             const hash = await sendTransaction(CONTRACT, data, valueHex);
 
-            showStatus('purchase-status', `Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
+            showStatus('purchase-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
 
-            // Wait for receipt (poll)
             const receipt = await waitForReceipt(hash);
             
             if (receipt && receipt.status === '0x1') {
-                showStatus('purchase-status', `Policy purchased! View on <a href="${EXPLORER}/tx/${hash}" target="_blank">Explorer</a>`, 'success');
+                showStatus('purchase-status', `✅ Policy purchased! <a href="${EXPLORER}/tx/${hash}" target="_blank">View on Explorer</a>`, 'success');
+                document.getElementById('flight-number').value = '';
+                document.getElementById('claimant-address').value = '';
                 await loadPolicies();
                 await loadTransfers();
+                await updateBalance();
             } else {
-                showStatus('purchase-status', 'Transaction reverted', 'error');
+                showStatus('purchase-status', '❌ Transaction reverted by contract', 'error');
             }
         } catch (e) {
             console.error(e);
-            showStatus('purchase-status', 'Error: ' + e.message, 'error');
+            if (e.code === 4001) {
+                showStatus('purchase-status', '❌ Transaction rejected by user', 'error');
+            } else {
+                showStatus('purchase-status', '❌ Error: ' + e.message, 'error');
+            }
+        } finally {
+            setProcessing(false);
         }
     }
 
     async function evaluatePolicy() {
-        if (!account) return;
+        if (!account || isProcessing) return;
 
         const policyId = parseInt(document.getElementById('eval-policy-id').value);
         const flightStatus = document.getElementById('eval-status').value;
         const delayMinutes = parseInt(document.getElementById('eval-delay').value);
 
+        if (isNaN(policyId) || policyId < 0) {
+            showStatus('eval-status', '❌ Invalid policy ID', 'error');
+            return;
+        }
+        if (isNaN(delayMinutes) || delayMinutes < 0) {
+            showStatus('eval-status', '❌ Delay minutes must be >= 0', 'error');
+            return;
+        }
+
         try {
-            showStatus('eval-status', 'Submitting transaction...', 'pending');
+            setProcessing(true);
+            showStatus('eval-status', '<span class="loading"></span>Submitting transaction...', 'pending');
 
             const data = encodeFunctionCall('evaluatePolicy', [policyId, flightStatus, delayMinutes]);
             const hash = await sendTransaction(CONTRACT, data);
 
-            showStatus('eval-status', `Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
+            showStatus('eval-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
 
             const receipt = await waitForReceipt(hash);
 
             if (receipt && receipt.status === '0x1') {
-                showStatus('eval-status', `Policy evaluated! View on <a href="${EXPLORER}/tx/${hash}" target="_blank">Explorer</a>`, 'success');
+                const action = flightStatus === 'DELAYED' ? 'Payout' : 'Refund';
+                showStatus('eval-status', `✅ Policy evaluated! ${action} triggered. <a href="${EXPLORER}/tx/${hash}" target="_blank">View on Explorer</a>`, 'success');
                 await loadPolicies();
                 await loadTransfers();
             } else {
-                showStatus('eval-status', 'Transaction reverted', 'error');
+                showStatus('eval-status', '❌ Transaction reverted by contract', 'error');
             }
         } catch (e) {
             console.error(e);
-            showStatus('eval-status', 'Error: ' + e.message, 'error');
+            if (e.code === 4001) {
+                showStatus('eval-status', '❌ Transaction rejected by user', 'error');
+            } else {
+                showStatus('eval-status', '❌ Error: ' + e.message, 'error');
+            }
+        } finally {
+            setProcessing(false);
         }
     }
 
@@ -342,20 +431,33 @@
         return null;
     }
 
+    async function updateBalance() {
+        if (!account) return;
+        const balanceHex = await window.ethereum.request({
+            method: 'eth_getBalance',
+            params: [account, 'latest'],
+        });
+        const balanceEth = parseInt(balanceHex, 16) / 1e18;
+        document.getElementById('wallet-balance').textContent = balanceEth.toFixed(4) + ' GEN';
+    }
+
     async function loadPolicies() {
         if (!account) return;
         
         try {
             let html = '';
-            for (let i = 0; i < 20; i++) {
+            let found = false;
+            
+            for (let i = 0; i < 50; i++) {
                 try {
                     const result = await callContract('getPolicy', [i]);
                     const decoded = decodeStringReturn(result);
                     const policy = JSON.parse(decoded);
-                    if (policy.exists === false) continue;
+                    if (policy.exists === false) break;
+                    found = true;
 
                     const statusClass = policy.status.toLowerCase();
-                    const verdictClass = policy.verdict ? policy.verdict.toLowerCase() : '';
+                    const verdictClass = policy.verdict ? policy.verdict.toLowerCase().replace('_', '') : '';
                     const amountGen = (parseInt(policy.amount) / 1e18).toFixed(4);
 
                     html += `
@@ -373,7 +475,7 @@
                                 <span class="info-label">Verdict</span>
                                 <span class="pill ${verdictClass}">${policy.verdict} (${policy.delay_minutes} min)</span>
                             </div>
-                            ` : '<div class="info-row"><span class="info-label" style="color:#ffd93d;">Pending evaluation</span></div>'}
+                            ` : '<div class="info-row"><span class="info-label" style="color:#ffd93d;">⏳ Pending evaluation</span></div>'}
                         </div>
                     `;
                 } catch (e) {
@@ -381,10 +483,10 @@
                 }
             }
 
-            document.getElementById('policies-list').innerHTML = html || '<p style="color:#888; font-size:0.85rem;">No policies found</p>';
+            document.getElementById('policies-list').innerHTML = found ? html : '<div class="empty-state">No policies found. Purchase one above!</div>';
         } catch (e) {
             console.error(e);
-            document.getElementById('policies-list').innerHTML = '<p style="color:#ff6b6b;">Error loading policies</p>';
+            document.getElementById('policies-list').innerHTML = '<div class="empty-state">Error loading policies</div>';
         }
     }
 
@@ -397,11 +499,14 @@
             const transfers = JSON.parse(decoded);
             
             let html = '';
+            let count = 0;
+            
             for (const [key, val] of Object.entries(transfers)) {
                 if (key === 'error') continue;
                 const t = typeof val === 'string' ? JSON.parse(val) : val;
                 const amountGen = (parseInt(t.amount) / 1e18).toFixed(4);
                 const typeClass = t.type;
+                count++;
 
                 html += `
                     <div class="transfer-item">
@@ -410,39 +515,58 @@
                             <span class="pill ${typeClass}">${t.type.toUpperCase()}</span>
                         </div>
                         <div class="info-row">
-                            <span class="info-label">${t.flight_number} • ${t.delay_minutes} min delay</span>
+                            <span class="info-label">${t.flight_number} • ${t.delay_minutes} min</span>
                             <span class="info-value">${amountGen} GEN</span>
                         </div>
                         <div class="info-row">
-                            <span class="info-label">To</span>
+                            <span class="info-label">Recipient</span>
                             <span class="info-value">${t.recipient.slice(0, 10)}...</span>
                         </div>
                     </div>
                 `;
             }
 
-            document.getElementById('transfers-list').innerHTML = html || '<p style="color:#888; font-size:0.85rem;">No transfers yet</p>';
+            document.getElementById('transfers-list').innerHTML = count > 0 ? html : '<div class="empty-state">No transfers yet</div>';
         } catch (e) {
             console.error(e);
-            document.getElementById('transfers-list').innerHTML = '<p style="color:#ff6b6b;">Error loading transfers</p>';
+            document.getElementById('transfers-list').innerHTML = '<div class="empty-state">Error loading transfers</div>';
         }
     }
 
-    function decodeStringReturn(hex) {
-        // Remove 0x prefix
-        hex = hex.slice(2);
-        // Skip offset (first 64 chars = 32 bytes)
-        // Skip length (next 64 chars = 32 bytes)
-        // Get actual string data
-        const lengthHex = hex.substr(64, 64);
-        const length = parseInt(lengthHex, 16);
-        const dataHex = hex.substr(128, length * 2);
-        let str = '';
-        for (let i = 0; i < dataHex.length; i += 2) {
-            str += String.fromCharCode(parseInt(dataHex.substr(i, 2), 16));
+    // Check if already connected on page load
+    window.addEventListener('load', async () => {
+        if (window.ethereum) {
+            try {
+                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                if (accounts.length > 0) {
+                    account = accounts[0];
+                    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+                    if (chainId === EXPECTED_CHAIN_ID) {
+                        document.getElementById('wallet-address').textContent = account.slice(0, 6) + '...' + account.slice(-4);
+                        document.getElementById('wallet-info').style.display = 'block';
+                        document.getElementById('connect-btn').style.display = 'none';
+                        document.getElementById('purchase-btn').disabled = false;
+                        document.getElementById('eval-btn').disabled = false;
+
+                        const balanceHex = await window.ethereum.request({
+                            method: 'eth_getBalance',
+                            params: [account, 'latest'],
+                        });
+                        const balanceEth = parseInt(balanceHex, 16) / 1e18;
+                        document.getElementById('wallet-balance').textContent = balanceEth.toFixed(4) + ' GEN';
+
+                        await loadPolicies();
+                        await loadTransfers();
+
+                        window.ethereum.on('accountsChanged', handleAccountsChanged);
+                        window.ethereum.on('chainChanged', () => window.location.reload());
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+            }
         }
-        return str;
-    }
+    });
     </script>
 </body>
 </html>
