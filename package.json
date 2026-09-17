@@ -1,0 +1,19 @@
+{
+  "name": "delayguard-protocol",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Flight Insurance on GenLayer Bradbury Testnet",
+  "main": "scripts/deploy.mjs",
+  "scripts": {
+    "deploy": "node scripts/deploy.mjs",
+    "test": "echo 'Run tests from genlayer-project: pytest ../delayguard-protocol/tests/test_delayguard.py -v'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Adebisi1111/delayguard-protocol.git"
+  },
+  "dependencies": {
+    "genlayer-js": "^1.0.0",
+    "viem": "^2.0.0"
+  }
+}
