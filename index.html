@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DelayGuard Protocol — Flight Insurance</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0a0a0f; color: #e0e0e0; min-height: 100vh; }
@@ -128,94 +129,21 @@
     const EXPECTED_CHAIN_ID = '0x107d';
     const RPC_URL = 'https://rpc-bradbury.genlayer.com';
 
+    // Contract ABI
+    const ABI = [
+        "function purchasePolicy(string flight_number, string flight_date, string claimant) payable returns (uint256)",
+        "function evaluatePolicy(uint256 policy_id, string flight_status, uint256 delay_minutes) returns (string)",
+        "function getPolicy(uint256 policy_id) view returns (string)",
+        "function getTransferCount() view returns (string)",
+        "function getEmittedTransfers() view returns (string)",
+        "function getTransfer(string index) view returns (string)"
+    ];
+
+    let provider = null;
+    let signer = null;
+    let contract = null;
     let account = null;
     let isProcessing = false;
-
-    // Function selectors (first 4 bytes of keccak256 signature)
-    const SELECTORS = {
-        'purchasePolicy': '0x42a7850a',
-        'evaluatePolicy': '0x093913f4',
-        'getPolicy': '0x2b07fce3',
-        'getTransferCount': '0x040e55f5',
-        'getEmittedTransfers': '0xbf341512',
-        'getTransfer': '0x7ec6cfca',
-    };
-
-    // ABI encoder for function calls
-    function encodeFunctionCall(functionName, args) {
-        const selector = SELECTORS[functionName];
-        if (!selector) throw new Error('Unknown function: ' + functionName);
-
-        // Separate head (static params + offsets) and data (dynamic params)
-        let head = '';
-        let data = '';
-        const dynamicOffsets = [];
-
-        for (let i = 0; i < args.length; i++) {
-            const arg = args[i];
-
-            if (typeof arg === 'number' || typeof arg === 'bigint') {
-                // uint256 — static 32 bytes
-                head += BigInt(arg).toString(16).padStart(64, '0');
-            } else if (typeof arg === 'string' && isHexAddress(arg)) {
-                // address — static 32 bytes (left-padded)
-                head += arg.slice(2).toLowerCase().padStart(64, '0');
-            } else if (typeof arg === 'string') {
-                // string — dynamic: write offset in head, data in data section
-                const strBytes = new TextEncoder().encode(arg);
-                const hex = bytesToHex(strBytes);
-                const paddedLen = Math.ceil(hex.length / 64) * 64;
-
-                // Calculate where this string's data will be in the data section
-                let dataSectionSize = 0;
-                for (const off of dynamicOffsets) {
-                    dataSectionSize = Math.max(dataSectionSize, off.offset + off.length);
-                }
-                const strDataOffset = dataSectionSize;
-
-                dynamicOffsets.push({
-                    offset: strDataOffset,
-                    length: 64 + paddedLen // 32 bytes for length + padded string data
-                });
-
-                // Write offset relative to start of params (after head)
-                head += (args.length * 32 + strDataOffset).toString(16).padStart(64, '0');
-
-                // Write length + data in data section
-                data += strBytes.length.toString(16).padStart(64, '0');
-                data += hex.padEnd(paddedLen, '0');
-            }
-        }
-
-        return selector + head + data;
-    }
-
-    function isHexAddress(str) {
-        return typeof str === 'string' && str.startsWith('0x') && /^[0-9a-fA-F]+$/.test(str.slice(2));
-    }
-
-    function bytesToHex(bytes) {
-        return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-
-    function hexToBytes(hex) {
-        const bytes = [];
-        for (let i = 0; i < hex.length; i += 2) {
-            bytes.push(parseInt(hex.substr(i, 2), 16));
-        }
-        return new Uint8Array(bytes);
-    }
-
-    function decodeStringReturn(hex) {
-        hex = hex.slice(2);
-        // First 32 bytes: offset to string data
-        // Next 32 bytes: string length
-        // Then: string data
-        const lengthHex = hex.substr(64, 64);
-        const length = parseInt(lengthHex, 16);
-        const dataHex = hex.substr(128, length * 2);
-        return new TextDecoder().decode(hexToBytes(dataHex));
-    }
 
     function showStatus(elementId, message, type) {
         const el = document.getElementById(elementId);
@@ -246,10 +174,11 @@
 
             showStatus('purchase-status', '<span class="loading"></span>Connecting to wallet...', 'pending');
 
+            // Request account access
             const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
             account = accounts[0];
 
-            // Auto-detect and auto-switch network
+            // Check and switch network
             const currentChainId = await window.ethereum.request({ method: 'eth_chainId' });
 
             if (currentChainId !== EXPECTED_CHAIN_ID) {
@@ -285,29 +214,35 @@
                 }
             }
 
+            // Confirm final network
             const finalChainId = await window.ethereum.request({ method: 'eth_chainId' });
             if (finalChainId !== EXPECTED_CHAIN_ID) {
                 throw new Error('Failed to switch to Bradbury testnet');
             }
 
+            // Setup ethers provider and contract
+            provider = new ethers.BrowserProvider(window.ethereum);
+            signer = await provider.getSigner();
+            contract = new ethers.Contract(CONTRACT, ABI, signer);
+
+            // Update UI
             document.getElementById('wallet-address').textContent = account.slice(0, 6) + '...' + account.slice(-4);
             document.getElementById('wallet-info').style.display = 'block';
             document.getElementById('connect-btn').style.display = 'none';
             document.getElementById('purchase-btn').disabled = false;
             document.getElementById('eval-btn').disabled = false;
 
-            const balanceHex = await window.ethereum.request({
-                method: 'eth_getBalance',
-                params: [account, 'latest'],
-            });
-            const balanceEth = parseInt(balanceHex, 16) / 1e18;
-            document.getElementById('wallet-balance').textContent = balanceEth.toFixed(4) + ' GEN';
+            // Get balance
+            const balance = await provider.getBalance(account);
+            document.getElementById('wallet-balance').textContent = parseFloat(ethers.formatEther(balance)).toFixed(4) + ' GEN';
 
             clearStatus('purchase-status');
 
+            // Load data
             await loadPolicies();
             await loadTransfers();
 
+            // Listen for changes
             window.ethereum.on('accountsChanged', handleAccountsChanged);
             window.ethereum.on('chainChanged', () => window.location.reload());
 
@@ -334,6 +269,9 @@
 
     function disconnectWallet() {
         account = null;
+        provider = null;
+        signer = null;
+        contract = null;
         document.getElementById('wallet-info').style.display = 'none';
         document.getElementById('connect-btn').style.display = 'block';
         document.getElementById('purchase-btn').disabled = true;
@@ -348,24 +286,8 @@
         }
     }
 
-    async function sendTransaction(to, data, value = '0x0') {
-        return await window.ethereum.request({
-            method: 'eth_sendTransaction',
-            params: [{ from: account, to, data, value }],
-        });
-    }
-
-    async function callContract(functionName, args) {
-        const data = encodeFunctionCall(functionName, args);
-        const result = await window.ethereum.request({
-            method: 'eth_call',
-            params: [{ from: account, to: CONTRACT, data }, 'latest'],
-        });
-        return result;
-    }
-
     async function purchasePolicy() {
-        if (!account || isProcessing) return;
+        if (!account || isProcessing || !contract) return;
 
         const flightNumber = document.getElementById('flight-number').value.trim();
         const flightDate = document.getElementById('flight-date').value;
@@ -389,16 +311,16 @@
             setProcessing(true);
             showStatus('purchase-status', '<span class="loading"></span>Submitting transaction...', 'pending');
 
-            const valueHex = '0x' + Math.floor(parseFloat(amount) * 1e18).toString(16);
-            const data = encodeFunctionCall('purchasePolicy', [flightNumber, flightDate, claimant]);
-            const hash = await sendTransaction(CONTRACT, data, valueHex);
+            const tx = await contract.purchasePolicy(flightNumber, flightDate, claimant, {
+                value: ethers.parseEther(amount)
+            });
 
-            showStatus('purchase-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
+            showStatus('purchase-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${tx.hash}" target="_blank">${tx.hash.slice(0, 10)}...</a>`, 'pending');
 
-            const receipt = await waitForReceipt(hash);
+            const receipt = await tx.wait();
 
-            if (receipt && receipt.status === '0x1') {
-                showStatus('purchase-status', `✅ Policy purchased! <a href="${EXPLORER}/tx/${hash}" target="_blank">View on Explorer</a>`, 'success');
+            if (receipt && receipt.status === 1) {
+                showStatus('purchase-status', `✅ Policy purchased! <a href="${EXPLORER}/tx/${tx.hash}" target="_blank">View on Explorer</a>`, 'success');
                 document.getElementById('flight-number').value = '';
                 document.getElementById('claimant-address').value = '';
                 await loadPolicies();
@@ -409,10 +331,10 @@
             }
         } catch (e) {
             console.error(e);
-            if (e.code === 4001) {
+            if (e.code === 4001 || e.code === 'ACTION_REJECTED') {
                 showStatus('purchase-status', '❌ Transaction rejected by user', 'error');
             } else {
-                showStatus('purchase-status', '❌ Error: ' + e.message, 'error');
+                showStatus('purchase-status', '❌ Error: ' + (e.reason || e.message), 'error');
             }
         } finally {
             setProcessing(false);
@@ -420,7 +342,7 @@
     }
 
     async function evaluatePolicy() {
-        if (!account || isProcessing) return;
+        if (!account || isProcessing || !contract) return;
 
         const policyId = parseInt(document.getElementById('eval-policy-id').value);
         const flightStatus = document.getElementById('eval-status').value;
@@ -439,16 +361,15 @@
             setProcessing(true);
             showStatus('eval-status', '<span class="loading"></span>Submitting transaction...', 'pending');
 
-            const data = encodeFunctionCall('evaluatePolicy', [policyId, flightStatus, delayMinutes]);
-            const hash = await sendTransaction(CONTRACT, data);
+            const tx = await contract.evaluatePolicy(policyId, flightStatus, delayMinutes);
 
-            showStatus('eval-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${hash}" target="_blank">${hash.slice(0, 10)}...</a>`, 'pending');
+            showStatus('eval-status', `<span class="loading"></span>Waiting for consensus...<br>Tx: <a href="${EXPLORER}/tx/${tx.hash}" target="_blank">${tx.hash.slice(0, 10)}...</a>`, 'pending');
 
-            const receipt = await waitForReceipt(hash);
+            const receipt = await tx.wait();
 
-            if (receipt && receipt.status === '0x1') {
+            if (receipt && receipt.status === 1) {
                 const action = flightStatus === 'DELAYED' ? 'Payout' : 'Refund';
-                showStatus('eval-status', `✅ Policy evaluated! ${action} triggered. <a href="${EXPLORER}/tx/${hash}" target="_blank">View on Explorer</a>`, 'success');
+                showStatus('eval-status', `✅ Policy evaluated! ${action} triggered. <a href="${EXPLORER}/tx/${tx.hash}" target="_blank">View on Explorer</a>`, 'success');
                 await loadPolicies();
                 await loadTransfers();
             } else {
@@ -456,44 +377,24 @@
             }
         } catch (e) {
             console.error(e);
-            if (e.code === 4001) {
+            if (e.code === 4001 || e.code === 'ACTION_REJECTED') {
                 showStatus('eval-status', '❌ Transaction rejected by user', 'error');
             } else {
-                showStatus('eval-status', '❌ Error: ' + e.message, 'error');
+                showStatus('eval-status', '❌ Error: ' + (e.reason || e.message), 'error');
             }
         } finally {
             setProcessing(false);
         }
     }
 
-    async function waitForReceipt(hash, maxAttempts = 60) {
-        for (let i = 0; i < maxAttempts; i++) {
-            await new Promise(r => setTimeout(r, 5000));
-            try {
-                const receipt = await window.ethereum.request({
-                    method: 'eth_getTransactionReceipt',
-                    params: [hash],
-                });
-                if (receipt) return receipt;
-            } catch (e) {
-                // Continue polling
-            }
-        }
-        return null;
-    }
-
     async function updateBalance() {
-        if (!account) return;
-        const balanceHex = await window.ethereum.request({
-            method: 'eth_getBalance',
-            params: [account, 'latest'],
-        });
-        const balanceEth = parseInt(balanceHex, 16) / 1e18;
-        document.getElementById('wallet-balance').textContent = balanceEth.toFixed(4) + ' GEN';
+        if (!account || !provider) return;
+        const balance = await provider.getBalance(account);
+        document.getElementById('wallet-balance').textContent = parseFloat(ethers.formatEther(balance)).toFixed(4) + ' GEN';
     }
 
     async function loadPolicies() {
-        if (!account) return;
+        if (!account || !contract) return;
 
         try {
             let html = '';
@@ -501,9 +402,8 @@
 
             for (let i = 0; i < 50; i++) {
                 try {
-                    const result = await callContract('getPolicy', [i]);
-                    const decoded = decodeStringReturn(result);
-                    const policy = JSON.parse(decoded);
+                    const policyRaw = await contract.getPolicy(i);
+                    const policy = JSON.parse(policyRaw);
                     if (policy.exists === false) break;
                     found = true;
 
@@ -542,12 +442,11 @@
     }
 
     async function loadTransfers() {
-        if (!account) return;
+        if (!account || !contract) return;
 
         try {
-            const result = await callContract('getEmittedTransfers', []);
-            const decoded = decodeStringReturn(result);
-            const transfers = JSON.parse(decoded);
+            const transfersRaw = await contract.getEmittedTransfers();
+            const transfers = JSON.parse(transfersRaw);
 
             let html = '';
             let count = 0;
@@ -599,15 +498,15 @@
                     if (chainId !== EXPECTED_CHAIN_ID) {
                         showStatus('purchase-status', `<span class="loading"></span>Please switch to Bradbury testnet. <button onclick="connectWallet()" style="margin-top:0.5rem;">Switch Network</button>`, 'pending');
                     } else {
+                        // Setup contract for read-only operations
+                        provider = new ethers.BrowserProvider(window.ethereum);
+                        contract = new ethers.Contract(CONTRACT, ABI, provider);
+                        
                         document.getElementById('purchase-btn').disabled = false;
                         document.getElementById('eval-btn').disabled = false;
 
-                        const balanceHex = await window.ethereum.request({
-                            method: 'eth_getBalance',
-                            params: [account, 'latest'],
-                        });
-                        const balanceEth = parseInt(balanceHex, 16) / 1e18;
-                        document.getElementById('wallet-balance').textContent = balanceEth.toFixed(4) + ' GEN';
+                        const balance = await provider.getBalance(account);
+                        document.getElementById('wallet-balance').textContent = parseFloat(ethers.formatEther(balance)).toFixed(4) + ' GEN';
 
                         await loadPolicies();
                         await loadTransfers();

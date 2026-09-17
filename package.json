@@ -13,6 +13,7 @@
     "url": "https://github.com/Adebisi1111/delayguard-protocol.git"
   },
   "dependencies": {
+    "ethers": "^6.17.0",
     "genlayer-js": "^1.0.0",
     "viem": "^2.0.0"
   }
