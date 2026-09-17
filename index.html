@@ -124,8 +124,9 @@
     <script>
     const CONTRACT = '0x318CBF3Ad6B0c57F6BFCA096C9b55665e08cb883';
     const EXPLORER = 'https://explorer-bradbury.genlayer.com';
-    const CHAIN_ID = '0x1194D';
-    const EXPECTED_CHAIN_ID = '0x1194D';
+    const CHAIN_ID = '0x107d'; // 4221 in hex
+    const EXPECTED_CHAIN_ID = '0x107d';
+    const RPC_URL = 'https://rpc-bradbury.genlayer.com';
 
     let account = null;
     let isProcessing = false;
@@ -235,7 +236,7 @@
                             params: [{
                                 chainId: EXPECTED_CHAIN_ID,
                                 chainName: 'GenLayer Bradbury Testnet',
-                                rpcUrls: ['https://studio.genlayer.com/api'],
+                                rpcUrls: [RPC_URL],
                                 nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
                                 blockExplorerUrls: [EXPLORER],
                             }],
